@@ -34,12 +34,12 @@ export default function Studio() {
           <div className="mb-8 grid grid-cols-2 gap-y-8 border-b border-border pb-8 md:grid-cols-3 md:divide-x md:divide-border">
             <div className="md:pr-8">
               <p className="mb-2 text-[10px] uppercase tracking-[0.3em] text-muted">Studio</p>
-              <p className="font-serif text-xl font-light">アトリエ泉野</p>
+              <p className="text-xl font-light">アトリエ泉野</p>
             </div>
             <div className="md:px-8">
               <p className="mb-2 text-[10px] uppercase tracking-[0.3em] text-muted">Location</p>
               <p className="text-[13px] font-light leading-relaxed text-foreground/80">
-                石川県金沢市
+                石川県金沢市泉野町3-1-35
               </p>
             </div>
             <div className="col-span-2 flex items-center md:col-span-1 md:justify-end md:pl-8">
@@ -61,7 +61,7 @@ export default function Studio() {
           <div className="overflow-hidden border border-border">
             <iframe
               title="Ballet class with Amy — Studio Location"
-              src="https://maps.google.com/maps?q=アトリエ泉野+石川県金沢市&output=embed&hl=ja"
+              src="https://maps.google.com/maps?q=石川県金沢市泉野町3-1-35&output=embed&hl=ja"
               width="100%"
               height="450"
               style={{ border: 0 }}

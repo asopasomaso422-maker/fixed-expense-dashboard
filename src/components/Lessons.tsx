@@ -103,7 +103,9 @@ export default function Lessons() {
               LINEでレッスンのご相談
             </TrackedLink>
             <TrackedLink
-              href="https://mail.google.com/mail/?view=cm&fs=1&to=amyodonoghue1121@gmail.com&su=レッスンのお問い合わせ"
+              href="https://mail.google.com/mail/?view=cm&fs=1&to=amyodonoghue1121@gmail.com&su=%E3%83%AC%E3%83%83%E3%82%B9%E3%83%B3%E3%81%AE%E3%81%8A%E5%95%8F%E3%81%84%E5%90%88%E3%82%8F%E3%81%9B"
+              target="_blank"
+              rel="noopener noreferrer"
               eventName="click_email_contact"
               eventParams={{ location: "lessons_section" }}
               className="text-[11px] uppercase tracking-[0.3em] text-muted transition-colors hover:text-foreground"

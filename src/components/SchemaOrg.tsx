@@ -31,7 +31,9 @@ export default function SchemaOrg() {
         ],
         address: {
           "@type": "PostalAddress",
-          addressLocality: "Tokyo",
+          streetAddress: "泉野町3-1-35",
+          addressLocality: "金沢市",
+          addressRegion: "石川県",
           addressCountry: "JP",
         },
         contactPoint: {

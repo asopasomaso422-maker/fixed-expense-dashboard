@@ -1,4 +1,4 @@
-import { InstagramIcon, YoutubeIcon, MailIcon, LineIcon } from "./icons/BrandIcons";
+import { InstagramIcon, YoutubeIcon, MailIcon } from "./icons/BrandIcons";
 import Link from "next/link";
 import TrackedLink from "./TrackedLink";
 
@@ -27,7 +27,7 @@ export default function Footer() {
             </p>
             <p className="mt-6 max-w-sm text-sm font-light leading-relaxed text-foreground/70">
               バレエを中心に、ライフスタイルと表現を綴るエディトリアルサイト。
-              ご連絡・お仕事のご依頼はLINEまたはメールにて承っております。
+              ご連絡・お仕事のご依頼はメールにて承っております。
             </p>
 
             <nav
@@ -41,9 +41,22 @@ export default function Footer() {
                 aria-label="Instagram (@amyodsan)"
                 eventName="social_click"
                 eventParams={{ platform: "Instagram", account: "amyodsan" }}
-                className="text-foreground/70 transition-colors hover:text-foreground"
+                className="flex flex-col items-center gap-1 text-foreground/70 transition-colors hover:text-foreground"
               >
                 <InstagramIcon className="h-5 w-5" />
+                <span className="text-[8px] uppercase tracking-widest">Life</span>
+              </TrackedLink>
+              <TrackedLink
+                href="https://www.instagram.com/amy_ballet_sensei/"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Instagram (@amy_ballet_sensei)"
+                eventName="social_click"
+                eventParams={{ platform: "Instagram", account: "amy_ballet_sensei" }}
+                className="flex flex-col items-center gap-1 text-foreground/70 transition-colors hover:text-foreground"
+              >
+                <InstagramIcon className="h-5 w-5" />
+                <span className="text-[8px] uppercase tracking-widest">Ballet</span>
               </TrackedLink>
               <TrackedLink
                 href="https://www.youtube.com/@balletaod2804/featured"
@@ -57,18 +70,9 @@ export default function Footer() {
                 <YoutubeIcon className="h-5 w-5" />
               </TrackedLink>
               <TrackedLink
-                href="https://line.me/R/ti/p/@038wyqas?ts=07251906&oat_content=url"
+                href="https://mail.google.com/mail/?view=cm&fs=1&to=amyodonoghue1121@gmail.com&su=%E3%81%8A%E5%95%8F%E3%81%84%E5%90%88%E3%82%8F%E3%81%9B"
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label="公式LINE"
-                eventName="contact_click"
-                eventParams={{ method: "LINE", location: "footer" }}
-                className="text-foreground/70 transition-colors hover:text-foreground"
-              >
-                <LineIcon className="h-5 w-5" />
-              </TrackedLink>
-              <TrackedLink
-                href="https://mail.google.com/mail/?view=cm&fs=1&to=amyodonoghue1121@gmail.com&su=お問い合わせ"
                 aria-label="メールで問い合わせる"
                 eventName="contact_click"
                 eventParams={{ method: "email", location: "footer" }}
