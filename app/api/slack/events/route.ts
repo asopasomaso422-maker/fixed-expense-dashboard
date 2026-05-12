@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { classifyTask } from "../../../../lib/classifyTask";
+import { notionAddTask } from "../../../../lib/notion";
 import { postSlackMessage } from "../../../../lib/slack";
 import { supabaseInsertTask } from "../../../../lib/supabase";
 
@@ -24,14 +25,15 @@ function verifySlackSignature(req: NextRequest, rawBody: string) {
   return safeCompare(expected, sig);
 }
 
-// 箇条書き（・ - • 改行）を個別タスクに分割
 function splitTasks(text: string): string[] {
-  const lines = text.split(/\n|・|•/).map((l) =>
-    l.replace(/^[-・•\s]+/, "").trim()
-  );
-  const tasks = lines.filter((l) => l.length > 0).map((l) => l.slice(0, MAX_TITLE_LEN));
-  return tasks.length > 0 ? tasks : [];
+  return text
+    .split(/\n|・|•/)
+    .map((l) => l.replace(/^[-・•\s]+/, "").trim())
+    .filter((l) => l.length > 0)
+    .map((l) => l.slice(0, MAX_TITLE_LEN));
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
@@ -58,24 +60,33 @@ export async function POST(req: NextRequest) {
     const titles = splitTasks(rawText);
     if (titles.length === 0) return NextResponse.json({ ok: true });
 
-    const results = await Promise.all(
-      titles.map(async (title) => {
-        const c = await classifyTask(title);
-        await supabaseInsertTask({
+    const channel = String(event.channel);
+    const userId = String(event.user || "");
+
+    // Geminiのレート制限を避けるため順番に処理
+    const results: { title: string; project: string; status: string; priority: string }[] = [];
+    for (const title of titles) {
+      const c = await classifyTask(title);
+      await Promise.all([
+        supabaseInsertTask({
           title, memo: "", project: c.project, status: c.status, priority: c.priority,
           urgency: c.urgency, impact: c.impact,
-          source: "slack", slack_user_id: String(event.user || ""), slack_channel_id: String(event.channel || ""),
-        });
-        return { title, c };
-      })
-    );
+          source: "slack", slack_user_id: userId, slack_channel_id: channel,
+        }),
+        notionAddTask(title, c),
+      ]);
+      results.push({ title, project: c.project, status: c.status, priority: c.priority });
+      if (titles.length > 1) await sleep(500); // レート制限対策
+    }
 
-    const lines = results.map(({ title, c }) => `• *${title}*\n  → ${c.project} / ${c.status} / ${c.priority}優先`);
+    const lines = results.map(({ title, project, status, priority }) =>
+      `• *${title}*\n  → ${project} / ${status} / ${priority}優先`
+    );
     const reply = results.length === 1
       ? `✅ 追加しました\n${lines[0]}`
       : `✅ ${results.length}件追加しました\n${lines.join("\n")}`;
 
-    await postSlackMessage(String(event.channel), reply);
+    await postSlackMessage(channel, reply);
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error("[slack] ERROR:", e instanceof Error ? e.message : e);
