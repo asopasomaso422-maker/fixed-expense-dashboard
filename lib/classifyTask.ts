@@ -29,14 +29,23 @@ const PROJECTS: TaskProject[] = [
 const PROMPT = `あなたはタスク管理アシスタントです。
 以下のメッセージを分析し、JSON のみを返してください（説明文不要）。
 
-プロジェクト候補: ${PROJECTS.join(", ")}
+プロジェクト候補（必ずいずれかを選ぶ）:
+- KANON法人: 売上・請求・契約・営業・税務・支払い・法人関連
+- ホークリーク: ホークリーク関連
+- 津幡町SNS: SNS・投稿・地域情報
+- 映像案件: 動画・編集・撮影・構成・ポッドキャスト・音声・YouTube・ハナ・三和・能登・ana・パブリックラウンジ
+- アプリ開発: アプリ・開発・プログラム・システム
+- 家族: 家族・妻・子供・保育園・明日の用意・個人の準備
+- 投資: 株・投資・調査・比較・資産
+- その他: 上記に当てはまらない場合
+
 ステータス候補: inbox(未分類), today(今日中), week(今週中), later(いつか), research(調査), done(完了)
 優先度候補: high, medium, low
 
-返却フォーマット:
+返却フォーマット（JSONのみ）:
 {"project":"...","status":"...","priority":"...","urgency":"high|medium|low","impact":"high|medium|low|family|future_asset"}
 
-メッセージ: `;
+タスク: `;
 
 function fallback(): Classification {
   return { project: "その他", status: "inbox", priority: "medium", urgency: "medium", impact: "medium" };
