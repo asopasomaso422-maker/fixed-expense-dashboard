@@ -27,31 +27,42 @@ export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   try {
     const body = JSON.parse(rawBody);
+    console.log("[slack] type:", body.type, "event:", body.event?.type, "bot_id:", body.event?.bot_id);
 
     if (body.type === "url_verification") {
       return new NextResponse(body.challenge, { status: 200, headers: { "content-type": "text/plain" } });
     }
 
-    if (!verifySlackSignature(req, rawBody)) return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+    if (!verifySlackSignature(req, rawBody)) {
+      console.log("[slack] invalid signature");
+      return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+    }
 
     const event = body.event;
     if (!event || event.bot_id) return NextResponse.json({ ok: true });
 
     const isTarget = event.type === "app_mention" || (event.type === "message" && event.channel_type === "im");
+    console.log("[slack] isTarget:", isTarget, "channel_type:", event.channel_type);
     if (!isTarget) return NextResponse.json({ ok: true });
 
     const title = String(event.text || "").replace(/<@\w+>/g, "").replace(/\s+/g, " ").trim().slice(0, MAX_TITLE_LEN);
+    console.log("[slack] title:", JSON.stringify(title));
     if (!title) return NextResponse.json({ ok: true });
 
     const c = await classifyTask(title);
+    console.log("[slack] classified:", c);
+
     await supabaseInsertTask({
       title, memo: "", project: c.project, status: c.status, priority: c.priority, urgency: c.urgency, impact: c.impact,
       source: "slack", slack_user_id: String(event.user || ""), slack_channel_id: String(event.channel || ""),
     });
+    console.log("[slack] supabase insert ok");
 
     await postSlackMessage(String(event.channel), `${c.project} / ${c.status} / ${c.priority} 優先 として追加しました: ${title}`);
+    console.log("[slack] message sent");
     return NextResponse.json({ ok: true });
   } catch (e) {
+    console.error("[slack] ERROR:", e instanceof Error ? e.message : e);
     return NextResponse.json({ error: e instanceof Error ? e.message : "unknown" }, { status: 500 });
   }
 }
