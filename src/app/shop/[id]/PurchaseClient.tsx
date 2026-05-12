@@ -70,7 +70,7 @@ export default function PurchaseClient({ productId }: { productId: string }) {
       if (!res.ok) throw new Error("checkout failed");
       const { url } = await res.json();
       trackEvent("begin_checkout", { value: total, currency: "JPY" });
-      window.location.href = url;
+      window.location.assign(url);
     } catch {
       setError("決済ページへの移動に失敗しました。もう一度お試しください。");
     } finally {
