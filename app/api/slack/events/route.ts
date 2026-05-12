@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     const title = String(event.text || "").replace(/<@\w+>/g, "").replace(/\s+/g, " ").trim().slice(0, MAX_TITLE_LEN);
     if (!title) return NextResponse.json({ ok: true });
 
-    const c = classifyTask(title);
+    const c = await classifyTask(title);
     await supabaseInsertTask({
       title, memo: "", project: c.project, status: c.status, priority: c.priority, urgency: c.urgency, impact: c.impact,
       source: "slack", slack_user_id: String(event.user || ""), slack_channel_id: String(event.channel || ""),
