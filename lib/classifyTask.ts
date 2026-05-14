@@ -19,6 +19,7 @@ export type Classification = {
   priority: TaskPriority;
   urgency: string;
   impact: string;
+  due_date: string | null; // YYYY-MM-DD
 };
 
 const PROJECTS: TaskProject[] = [
@@ -26,8 +27,11 @@ const PROJECTS: TaskProject[] = [
   "アプリ開発", "家族", "投資", "その他",
 ];
 
-const PROMPT = `あなたはタスク管理アシスタントです。
+function buildPrompt(title: string): string {
+  const today = new Date().toISOString().slice(0, 10);
+  return `あなたはタスク管理アシスタントです。
 以下のメッセージを分析し、JSON のみを返してください（説明文不要）。
+今日の日付: ${today}
 
 プロジェクト候補（必ずいずれかを選ぶ）:
 - KANON法人: 売上・請求・契約・営業・税務・支払い・法人関連
@@ -42,13 +46,16 @@ const PROMPT = `あなたはタスク管理アシスタントです。
 ステータス候補: inbox(未分類), today(今日中), week(今週中), later(いつか), research(調査), done(完了)
 優先度候補: high, medium, low
 
-返却フォーマット（JSONのみ）:
-{"project":"...","status":"...","priority":"...","urgency":"high|medium|low","impact":"high|medium|low|family|future_asset"}
+期限日: 「明日」「今週金曜」「5/20まで」「来週月曜」などが含まれていれば今日の日付を基準に YYYY-MM-DD 形式で返す。期限の記載がなければ null を返す。
 
-タスク: `;
+返却フォーマット（JSONのみ）:
+{"project":"...","status":"...","priority":"...","urgency":"high|medium|low","impact":"high|medium|low","due_date":"YYYY-MM-DD or null"}
+
+タスク: ${title}`;
+}
 
 function fallback(): Classification {
-  return { project: "その他", status: "inbox", priority: "medium", urgency: "medium", impact: "medium" };
+  return { project: "その他", status: "inbox", priority: "medium", urgency: "medium", impact: "medium", due_date: null };
 }
 
 function parseJson(text: string): Classification | null {
@@ -57,6 +64,7 @@ function parseJson(text: string): Classification | null {
   try {
     const obj = JSON.parse(match[0]);
     if (!PROJECTS.includes(obj.project)) return null;
+    if (obj.due_date === "null" || obj.due_date === "") obj.due_date = null;
     return obj as Classification;
   } catch {
     return null;
@@ -66,12 +74,11 @@ function parseJson(text: string): Classification | null {
 export async function classifyTask(title: string): Promise<Classification> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return fallback();
-
   try {
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: "gemini-2.0-flash",
-      contents: PROMPT + title,
+      contents: buildPrompt(title),
     });
     const text = response.text ?? "";
     return parseJson(text) ?? fallback();
