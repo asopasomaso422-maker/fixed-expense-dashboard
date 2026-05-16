@@ -140,6 +140,11 @@ export async function POST(req: NextRequest) {
       return new NextResponse(body.challenge, { status: 200, headers: { "content-type": "text/plain" } });
     }
 
+    // Slackのリトライを無視（処理遅延による重複防止）
+    if (req.headers.get("x-slack-retry-num")) {
+      return NextResponse.json({ ok: true });
+    }
+
     if (!verifySlackSignature(req, rawBody)) {
       return NextResponse.json({ error: "invalid signature" }, { status: 401 });
     }
