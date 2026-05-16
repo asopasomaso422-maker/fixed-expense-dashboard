@@ -235,7 +235,7 @@ export async function POST(req: NextRequest) {
     const titles = splitTasks(rawText);
     if (titles.length === 0) return NextResponse.json({ ok: true });
 
-    const results: { title: string; project: string; status: string; priority: string; due_date: string | null }[] = [];
+    const results: { title: string; project: string; genre: string; priority: string; due_date: string | null }[] = [];
     for (const title of titles) {
       const c = await classifyTask(title);
       await Promise.all([
@@ -246,13 +246,13 @@ export async function POST(req: NextRequest) {
         }),
         notionAddTask(title, c),
       ]);
-      results.push({ title, project: c.project, status: c.status, priority: c.priority, due_date: c.due_date });
+      results.push({ title, project: c.project, genre: c.genre, priority: c.priority, due_date: c.due_date });
       if (titles.length > 1) await sleep(500);
     }
-    const lines = results.map(({ title, project, status, priority, due_date }) => {
+    const lines = results.map(({ title, project, genre, priority, due_date }) => {
       const pri = priority === "高" ? "🔴" : priority === "中" ? "🟡" : "🟢";
       const due = due_date ? `\n  📅 期限: ${due_date}` : "";
-      return `• ${pri} *${title}*\n  ${project} / ${status}${due}`;
+      return `• ${pri} *${title}*\n  ${project} / ${genre}${due}`;
     });
     const reply = results.length === 1
       ? `✅ タスクを追加しました\n${lines[0]}`

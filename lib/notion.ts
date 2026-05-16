@@ -7,6 +7,7 @@ export type NotionTask = {
   status: string;
   priority: string;
   importance: string;
+  genre: string;
   project: string;
   due_date: string | null;
   memo: string;
@@ -27,11 +28,12 @@ function extractTasks(results: unknown[]): NotionTask[] {
     const status = (p["ステータス"] as { select: { name: string } })?.select?.name ?? "";
     const priority = (p["優先度"] as { select: { name: string } })?.select?.name ?? "";
     const importance = (p["重要度"] as { select: { name: string } })?.select?.name ?? "";
+    const genre = (p["ジャンル"] as { select: { name: string } })?.select?.name ?? "";
     const project = (p["プロジェクト"] as { select: { name: string } })?.select?.name ?? "";
     const due_date = (p["期限日"] as { date: { start: string } })?.date?.start ?? null;
     const memoArr = (p["メモ"] as { rich_text: Array<{ plain_text: string }> })?.rich_text ?? [];
     const memo = memoArr.map((t) => t.plain_text).join("");
-    return { id: (page as { id: string }).id, title, status, priority, importance, project, due_date, memo };
+    return { id: (page as { id: string }).id, title, status, priority, importance, genre, project, due_date, memo };
   });
 }
 
@@ -47,6 +49,7 @@ export async function notionAddTask(title: string, c: Classification) {
     ステータス: { select: { name: c.status } },
     優先度: { select: { name: c.priority } },
     重要度: { select: { name: c.importance } },
+    ジャンル: { select: { name: c.genre } },
     ソース: { rich_text: [{ text: { content: "slack" } }] },
   };
   if (c.due_date) {
