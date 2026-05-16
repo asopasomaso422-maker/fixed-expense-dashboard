@@ -15,6 +15,7 @@ export type TaskPriority = "高" | "中" | "低";
 export type TaskImportance = "高" | "中" | "低";
 
 export type Classification = {
+  intent: "task";
   project: TaskProject;
   status: TaskStatus;
   priority: TaskPriority;
@@ -24,6 +25,8 @@ export type Classification = {
   due_date: string | null; // YYYY-MM-DD
 };
 
+export type ClassifyResult = { intent: "question" } | Classification;
+
 const PROJECTS: TaskProject[] = [
   "KANON法人", "ホークリーク", "津幡町SNS", "映像案件",
   "アプリ開発", "家族", "投資", "その他",
@@ -31,9 +34,20 @@ const PROJECTS: TaskProject[] = [
 
 function buildPrompt(title: string): string {
   const today = new Date().toISOString().slice(0, 10);
-  return `あなたはタスク管理アシスタントです。
-以下のメッセージを分析し、JSON のみを返してください（説明文不要）。
+  return `あなたはタスク管理AIです。以下のメッセージを分析してJSONのみ返してください。
 今日の日付: ${today}
+
+【ステップ1: intent判定】
+- "question": AIアシスタントへの質問・依頼・相談・指示
+  例: 「タスクを整理して」「今日何すればいい？」「アドバイスして」「〇〇を教えて」「優先順位は？」「どう思う？」「〇〇してください」
+- "task": ユーザー自身がやるべきToDo・作業
+  例: 「請求書を送る」「会議の準備」「明日までにレポート提出」「〇〇を確認する」
+
+questionの場合はこのJSONのみ:
+{"intent":"question"}
+
+taskの場合はこのJSONのみ:
+{"intent":"task","project":"...","status":"...","priority":"高|中|低","importance":"高|中|低","urgency":"high|medium|low","impact":"high|medium|low","due_date":"YYYY-MM-DD or null"}
 
 プロジェクト候補（必ずいずれかを選ぶ）:
 - KANON法人: 売上・請求・契約・営業・税務・支払い・法人関連
@@ -45,36 +59,31 @@ function buildPrompt(title: string): string {
 - 投資: 株・投資・調査・比較・資産
 - その他: 上記に当てはまらない場合
 
-ステータス候補: inbox(未分類), today(今日中), week(今週中), later(いつか), research(調査), done(完了)
-優先度候補: 高, 中, 低
-重要度候補: 高（戦略的・長期的に大切）, 中, 低（緊急ではないが知っておくべき）
+ステータス: inbox/today/week/later/research/done
+期限日: 自然言語→YYYY-MM-DD。なければ null。
 
-期限日: 「明日」「今週金曜」「5/20まで」「来週月曜」などが含まれていれば今日の日付を基準に YYYY-MM-DD 形式で返す。期限の記載がなければ null を返す。
-
-返却フォーマット（JSONのみ）:
-{"project":"...","status":"...","priority":"高|中|低","importance":"高|中|低","urgency":"high|medium|low","impact":"high|medium|low","due_date":"YYYY-MM-DD or null"}
-
-タスク: ${title}`;
+メッセージ: ${title}`;
 }
 
 function fallback(): Classification {
-  return { project: "その他", status: "inbox", priority: "中", importance: "中", urgency: "medium", impact: "medium", due_date: null };
+  return { intent: "task", project: "その他", status: "inbox", priority: "中", importance: "中", urgency: "medium", impact: "medium", due_date: null };
 }
 
-function parseJson(text: string): Classification | null {
+function parseJson(text: string): ClassifyResult | null {
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) return null;
   try {
     const obj = JSON.parse(match[0]);
+    if (obj.intent === "question") return { intent: "question" };
     if (!PROJECTS.includes(obj.project)) return null;
     if (obj.due_date === "null" || obj.due_date === "") obj.due_date = null;
-    return obj as Classification;
+    return { intent: "task", ...obj } as Classification;
   } catch {
     return null;
   }
 }
 
-export async function classifyTask(title: string): Promise<Classification> {
+export async function classifyTask(title: string): Promise<ClassifyResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return fallback();
   try {
@@ -85,6 +94,7 @@ export async function classifyTask(title: string): Promise<Classification> {
     });
     const text = response.text ?? "";
     return parseJson(text) ?? fallback();
+
   } catch {
     return fallback();
   }
