@@ -6,6 +6,7 @@ export type NotionTask = {
   title: string;
   status: string;
   priority: string;
+  project: string;
   due_date: string | null;
 };
 
@@ -23,8 +24,9 @@ function extractTasks(results: unknown[]): NotionTask[] {
     const title = titleArr.map((t) => t.plain_text).join("");
     const status = (p["ステータス"] as { select: { name: string } })?.select?.name ?? "";
     const priority = (p["優先度"] as { select: { name: string } })?.select?.name ?? "";
+    const project = (p["プロジェクト"] as { select: { name: string } })?.select?.name ?? "";
     const due_date = (p["期限日"] as { date: { start: string } })?.date?.start ?? null;
-    return { id: (page as { id: string }).id, title, status, priority, due_date };
+    return { id: (page as { id: string }).id, title, status, priority, project, due_date };
   });
 }
 
@@ -55,6 +57,10 @@ export async function notionAddTask(title: string, c: Classification) {
 export async function notionQueryTasks(options: {
   excludeDone?: boolean;
   dueOnOrBefore?: string;
+  dueOnOrAfter?: string;
+  status?: string;
+  priority?: string;
+  project?: string;
 } = {}): Promise<NotionTask[]> {
   const env = getEnv();
   if (!env) return [];
@@ -62,12 +68,12 @@ export async function notionQueryTasks(options: {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const filters: any[] = [];
-  if (options.excludeDone) {
-    filters.push({ property: "ステータス", select: { does_not_equal: "done" } });
-  }
-  if (options.dueOnOrBefore) {
-    filters.push({ property: "期限日", date: { on_or_before: options.dueOnOrBefore } });
-  }
+  if (options.excludeDone) filters.push({ property: "ステータス", select: { does_not_equal: "done" } });
+  if (options.status) filters.push({ property: "ステータス", select: { equals: options.status } });
+  if (options.priority) filters.push({ property: "優先度", select: { equals: options.priority } });
+  if (options.project) filters.push({ property: "プロジェクト", select: { equals: options.project } });
+  if (options.dueOnOrBefore) filters.push({ property: "期限日", date: { on_or_before: options.dueOnOrBefore } });
+  if (options.dueOnOrAfter) filters.push({ property: "期限日", date: { on_or_after: options.dueOnOrAfter } });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const filter: any = filters.length === 0 ? undefined
@@ -75,12 +81,11 @@ export async function notionQueryTasks(options: {
     : { and: filters };
 
   try {
-    // Notion SDK v5: dataSources.query replaces databases.query
     const res = await notion.dataSources.query({
       data_source_id: dbId,
       filter,
       sorts: [{ property: "期限日", direction: "ascending" }],
-      page_size: 20,
+      page_size: 30,
     });
     return extractTasks(res.results);
   } catch (e) {
@@ -93,7 +98,6 @@ export async function notionFindTask(keyword: string): Promise<NotionTask[]> {
   const env = getEnv();
   if (!env) return [];
   const { notion, dbId } = env;
-
   try {
     const res = await notion.dataSources.query({
       data_source_id: dbId,
@@ -124,6 +128,33 @@ export async function notionCompleteTask(pageId: string): Promise<boolean> {
     return true;
   } catch (e) {
     console.error("[notion] completeTask ERROR:", e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
+export async function notionUpdateTask(pageId: string, updates: {
+  status?: string;
+  priority?: string;
+  due_date?: string | null;
+}): Promise<boolean> {
+  const env = getEnv();
+  if (!env) return false;
+  const { notion } = env;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const properties: Record<string, any> = {};
+  if (updates.status) properties["ステータス"] = { select: { name: updates.status } };
+  if (updates.priority) properties["優先度"] = { select: { name: updates.priority } };
+  if (updates.due_date !== undefined) {
+    properties["期限日"] = updates.due_date ? { date: { start: updates.due_date } } : { date: null };
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await notion.pages.update({ page_id: pageId, properties: properties as any });
+    return true;
+  } catch (e) {
+    console.error("[notion] updateTask ERROR:", e instanceof Error ? e.message : e);
     return false;
   }
 }

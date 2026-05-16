@@ -1,28 +1,28 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { aiChat, aiPlanToday } from "../../../../lib/ai";
 import { classifyTask } from "../../../../lib/classifyTask";
-import { notionAddTask, notionCompleteTask, notionFindTask, notionQueryTasks } from "../../../../lib/notion";
+import {
+  notionAddTask,
+  notionCompleteTask,
+  notionFindTask,
+  notionQueryTasks,
+  notionUpdateTask,
+} from "../../../../lib/notion";
 import { postSlackMessage } from "../../../../lib/slack";
 import { supabaseInsertTask } from "../../../../lib/supabase";
 
 const MAX_TITLE_LEN = 280;
 
-const safeCompare = (a: string, b: string) => {
-  const ab = Buffer.from(a), bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-};
-
-function verifySlackSignature(req: NextRequest, rawBody: string) {
+function verifySlackSignature(req: NextRequest, rawBody: string): boolean {
   const secret = process.env.SLACK_SIGNING_SECRET;
   if (!secret) throw new Error("SLACK_SIGNING_SECRET が未設定です。");
   const ts = req.headers.get("x-slack-request-timestamp") || "0";
   const sig = req.headers.get("x-slack-signature") || "";
-  const now = Math.floor(Date.now() / 1000);
-  if (Math.abs(now - Number(ts)) > 60 * 5) return false;
-  const base = `v0:${ts}:${rawBody}`;
-  const expected = `v0=${createHmac("sha256", secret).update(base).digest("hex")}`;
-  return safeCompare(expected, sig);
+  if (Math.abs(Math.floor(Date.now() / 1000) - Number(ts)) > 300) return false;
+  const expected = `v0=${createHmac("sha256", secret).update(`v0:${ts}:${rawBody}`).digest("hex")}`;
+  const ab = Buffer.from(expected), bb = Buffer.from(sig);
+  return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
 function splitTasks(text: string): string[] {
@@ -35,9 +35,46 @@ function splitTasks(text: string): string[] {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const COMPLETE_RE = /^完了\s+([\s\S]+)$/;
-const LIST_RE = /^(タスク)?一覧$/;
-const TODAY_TASKS_RE = /^今日のタスク$/;
+// ── Command patterns ─────────────────────────────────────────
+const RE_COMPLETE   = /^完了\s+([\s\S]+)$/;
+const RE_LIST       = /^(タスク)?一覧$/;
+const RE_TODAY      = /^今日のタスク$/;
+const RE_WEEK       = /^今週のタスク$/;
+const RE_HIGH       = /^高優先度(タスク)?$/;
+const RE_PLAN       = /^(今日の計画|今日何する|今日何をする|計画)$/;
+const RE_PRIORITY   = /^優先度変更\s+(.+)\s+(高|中|低)$/;
+const RE_PROJECT    = /^(.+)のタスク$/;
+const RE_HELP       = /^(ヘルプ|help|使い方|コマンド)$/i;
+
+const QUESTION_WORDS = /[？?]|^(どう|何|なぜ|なに|教えて|どれ|いつ|誰|どこ|アドバイス|提案|おすすめ|どう思)/;
+
+const PRIORITY_MAP: Record<string, string> = { 高: "high", 中: "medium", 低: "low" };
+const PROJECTS = ["KANON法人", "ホークリーク", "津幡町SNS", "映像案件", "アプリ開発", "家族", "投資", "その他"];
+
+const HELP_TEXT = `*📖 使い方*
+───────────────
+*タスク追加*
+→ そのままタスク内容を送る（期限・優先度も自然な文章でOK）
+例: \`明日までに請求書送る\`
+
+*タスク確認*
+• \`タスク一覧\` — 全未完了タスク
+• \`今日のタスク\` — 今日が期限のタスク
+• \`今週のタスク\` — 今週が期限のタスク
+• \`高優先度\` — 高優先度タスク
+• \`[プロジェクト名]のタスク\` — プロジェクト別
+例: \`KANON法人のタスク\`
+
+*タスク操作*
+• \`完了 タスク名\` — 完了にする
+• \`優先度変更 タスク名 高/中/低\` — 優先度を変更
+
+*AI秘書*
+• \`今日の計画\` — AIが今日の行動計画を作成
+• 質問や相談はそのまま送る
+───────────────`;
+
+// ── Handlers ─────────────────────────────────────────────────
 
 async function handleComplete(keyword: string, channel: string) {
   const tasks = await notionFindTask(keyword);
@@ -47,32 +84,41 @@ async function handleComplete(keyword: string, channel: string) {
   }
   const task = tasks[0];
   const ok = await notionCompleteTask(task.id);
-  await postSlackMessage(
-    channel,
-    ok ? `✅ 完了しました\n*${task.title}*` : `⚠️ 「${task.title}」の更新に失敗しました`
+  await postSlackMessage(channel, ok
+    ? `✅ 完了しました\n🎉 *${task.title}*`
+    : `⚠️ 「${task.title}」の更新に失敗しました`
   );
 }
 
-async function handleList(todayOnly: boolean, channel: string) {
-  const today = new Date().toISOString().slice(0, 10);
-  const tasks = await notionQueryTasks({
-    excludeDone: true,
-    dueOnOrBefore: todayOnly ? today : undefined,
-  });
-
+async function handleUpdatePriority(keyword: string, priJa: string, channel: string) {
+  const tasks = await notionFindTask(keyword);
   if (tasks.length === 0) {
-    await postSlackMessage(channel, todayOnly ? "📋 今日のタスクはありません 🎉" : "📋 未完了タスクはありません 🎉");
+    await postSlackMessage(channel, `❌ 「${keyword}」に一致するタスクが見つかりませんでした`);
     return;
   }
+  const task = tasks[0];
+  const priority = PRIORITY_MAP[priJa] ?? "medium";
+  const ok = await notionUpdateTask(task.id, { priority });
+  await postSlackMessage(channel, ok
+    ? `✅ 優先度を変更しました\n*${task.title}* → ${priJa}優先`
+    : `⚠️ 更新に失敗しました`
+  );
+}
 
-  const lines = tasks.slice(0, 10).map((t, i) => {
-    const due = t.due_date ? ` (期限: ${t.due_date})` : "";
+function formatTaskList(tasks: NotionTask[], header: string): string {
+  if (tasks.length === 0) return `${header}\n（該当するタスクはありません）`;
+  const today = new Date().toISOString().slice(0, 10);
+  const lines = tasks.slice(0, 15).map((t, i) => {
     const pri = t.priority === "high" ? "🔴" : t.priority === "medium" ? "🟡" : "🟢";
+    const due = t.due_date
+      ? t.due_date < today ? ` ⚠️期限切れ:${t.due_date}` : ` 📅${t.due_date}`
+      : "";
     return `${i + 1}. ${pri} *${t.title}*${due}`;
   });
-  const header = todayOnly ? `📋 今日のタスク（${tasks.length}件）` : `📋 タスク一覧（${tasks.length}件）`;
-  await postSlackMessage(channel, `${header}\n${lines.join("\n")}\n\n完了するには: \`完了 タスク名\``);
+  return `${header}\n${lines.join("\n")}\n\n_完了: \`完了 タスク名\` | 変更: \`優先度変更 タスク名 高/中/低\`_`;
 }
+
+// ── Main handler ──────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
@@ -99,24 +145,82 @@ export async function POST(req: NextRequest) {
     const channel = String(event.channel);
     const userId = String(event.user || "");
 
-    // コマンド処理
-    const completeMatch = COMPLETE_RE.exec(rawText);
-    if (completeMatch) {
-      await handleComplete(completeMatch[1].trim(), channel);
+    // ── ヘルプ ───────────────────────────────────────────────
+    if (RE_HELP.test(rawText)) {
+      await postSlackMessage(channel, HELP_TEXT);
       return NextResponse.json({ ok: true });
     }
 
-    if (LIST_RE.test(rawText)) {
-      await handleList(false, channel);
+    // ── タスク完了 ──────────────────────────────────────────
+    const completeM = RE_COMPLETE.exec(rawText);
+    if (completeM) {
+      await handleComplete(completeM[1].trim(), channel);
       return NextResponse.json({ ok: true });
     }
 
-    if (TODAY_TASKS_RE.test(rawText)) {
-      await handleList(true, channel);
+    // ── 優先度変更 ──────────────────────────────────────────
+    const prioM = RE_PRIORITY.exec(rawText);
+    if (prioM) {
+      await handleUpdatePriority(prioM[1].trim(), prioM[2], channel);
       return NextResponse.json({ ok: true });
     }
 
-    // タスク追加
+    // ── 今日の計画（AI） ────────────────────────────────────
+    if (RE_PLAN.test(rawText)) {
+      const tasks = await notionQueryTasks({ excludeDone: true });
+      await postSlackMessage(channel, "🤔 タスクを分析中...");
+      const plan = await aiPlanToday(tasks);
+      await postSlackMessage(channel, plan);
+      return NextResponse.json({ ok: true });
+    }
+
+    // ── タスク一覧系 ────────────────────────────────────────
+    if (RE_LIST.test(rawText)) {
+      const tasks = await notionQueryTasks({ excludeDone: true });
+      await postSlackMessage(channel, formatTaskList(tasks, `📋 *タスク一覧（${tasks.length}件）*`));
+      return NextResponse.json({ ok: true });
+    }
+
+    if (RE_TODAY.test(rawText)) {
+      const today = new Date().toISOString().slice(0, 10);
+      const tasks = await notionQueryTasks({ excludeDone: true, dueOnOrBefore: today });
+      await postSlackMessage(channel, formatTaskList(tasks, `📋 *今日のタスク（${tasks.length}件）*`));
+      return NextResponse.json({ ok: true });
+    }
+
+    if (RE_WEEK.test(rawText)) {
+      const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+      const tasks = await notionQueryTasks({ excludeDone: true, dueOnOrBefore: nextWeek });
+      await postSlackMessage(channel, formatTaskList(tasks, `📋 *今週のタスク（${tasks.length}件）*`));
+      return NextResponse.json({ ok: true });
+    }
+
+    if (RE_HIGH.test(rawText)) {
+      const tasks = await notionQueryTasks({ excludeDone: true, priority: "high" });
+      await postSlackMessage(channel, formatTaskList(tasks, `🔴 *高優先度タスク（${tasks.length}件）*`));
+      return NextResponse.json({ ok: true });
+    }
+
+    // ── プロジェクト別 ──────────────────────────────────────
+    const projectM = RE_PROJECT.exec(rawText);
+    if (projectM) {
+      const projectName = projectM[1].trim();
+      if (PROJECTS.includes(projectName)) {
+        const tasks = await notionQueryTasks({ excludeDone: true, project: projectName });
+        await postSlackMessage(channel, formatTaskList(tasks, `📁 *${projectName}のタスク（${tasks.length}件）*`));
+        return NextResponse.json({ ok: true });
+      }
+    }
+
+    // ── AI会話（質問・相談） ────────────────────────────────
+    if (QUESTION_WORDS.test(rawText)) {
+      const tasks = await notionQueryTasks({ excludeDone: true });
+      const reply = await aiChat(rawText, tasks);
+      await postSlackMessage(channel, reply);
+      return NextResponse.json({ ok: true });
+    }
+
+    // ── タスク追加（デフォルト） ────────────────────────────
     const titles = splitTasks(rawText);
     if (titles.length === 0) return NextResponse.json({ ok: true });
 
@@ -136,9 +240,9 @@ export async function POST(req: NextRequest) {
     }
 
     const lines = results.map(({ title, project, status, priority, due_date }) => {
-      const due = due_date ? `\n  📅 期限: ${due_date}` : "";
       const pri = priority === "high" ? "🔴" : priority === "medium" ? "🟡" : "🟢";
-      return `• ${pri} *${title}*\n  → ${project} / ${status}${due}`;
+      const due = due_date ? `\n  📅 期限: ${due_date}` : "";
+      return `• ${pri} *${title}*\n  ${project} / ${status}${due}`;
     });
     const reply = results.length === 1
       ? `✅ タスクを追加しました\n${lines[0]}`
@@ -146,8 +250,12 @@ export async function POST(req: NextRequest) {
 
     await postSlackMessage(channel, reply);
     return NextResponse.json({ ok: true });
+
   } catch (e) {
     console.error("[slack] ERROR:", e instanceof Error ? e.message : e);
     return NextResponse.json({ error: e instanceof Error ? e.message : "unknown" }, { status: 500 });
   }
 }
+
+// Type alias for handler param
+type NotionTask = Awaited<ReturnType<typeof notionQueryTasks>>[0];

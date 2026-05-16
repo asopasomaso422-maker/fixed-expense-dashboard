@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { aiMorningSummary } from "../../../../lib/ai";
 import { getUpcomingEvents } from "../../../../lib/googleCalendar";
 import { notionQueryTasks } from "../../../../lib/notion";
 import { assertCronAuthorized } from "../../../../lib/security";
@@ -17,19 +18,25 @@ export async function GET(req: NextRequest) {
       getUpcomingEvents(24),
     ]);
 
-    const overdue = allPending.filter((t) => t.due_date && t.due_date < today);
+    const overdue    = allPending.filter((t) => t.due_date && t.due_date < today);
     const todayTasks = allPending.filter((t) => t.due_date === today || t.status === "today");
-    const highPriority = allPending
+    const highOther  = allPending
       .filter((t) => t.priority === "high" && t.due_date !== today && (!t.due_date || t.due_date > today))
       .slice(0, 3);
 
-    const lines: string[] = ["🌅 おはようございます！今日のタスク確認です", "─────────────────────"];
+    // AI summary (optional, non-blocking)
+    const aiSummary = await aiMorningSummary(allPending, events);
+
+    const lines: string[] = ["🌅 *おはようございます！*", "───────────────────────"];
+
+    if (aiSummary) {
+      lines.push(aiSummary);
+      lines.push("───────────────────────");
+    }
 
     if (overdue.length > 0) {
       lines.push(`⚠️ *期限切れ（${overdue.length}件）*`);
-      overdue.slice(0, 5).forEach((t) => {
-        lines.push(`  • 🔴 ${t.title} (期限: ${t.due_date})`);
-      });
+      overdue.slice(0, 5).forEach((t) => lines.push(`  • 🔴 ${t.title}（${t.due_date}）`));
     }
 
     if (todayTasks.length > 0) {
@@ -38,14 +45,12 @@ export async function GET(req: NextRequest) {
         const pri = t.priority === "high" ? "🔴" : t.priority === "medium" ? "🟡" : "🟢";
         lines.push(`  ${pri} ${t.title}`);
       });
-    } else {
-      lines.push("\n📋 今日が期限のタスクはありません");
     }
 
-    if (highPriority.length > 0) {
-      lines.push(`\n🎯 *高優先度タスク*`);
-      highPriority.forEach((t) => {
-        const due = t.due_date ? ` (期限: ${t.due_date})` : "";
+    if (highOther.length > 0) {
+      lines.push(`\n🎯 *高優先度（その他）*`);
+      highOther.forEach((t) => {
+        const due = t.due_date ? ` 📅${t.due_date}` : "";
         lines.push(`  🔴 ${t.title}${due}`);
       });
     }
@@ -60,8 +65,8 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    lines.push("\n─────────────────────");
-    lines.push(`💬 \`タスク一覧\` で全タスク / \`完了 タスク名\` で完了`);
+    lines.push("\n───────────────────────");
+    lines.push("💬 `今日の計画` でAI行動計画 / `タスク一覧` で全件確認");
 
     await postSlackMessage(channel, lines.join("\n"));
     return NextResponse.json({ ok: true });
