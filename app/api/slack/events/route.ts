@@ -38,11 +38,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ── Command patterns ─────────────────────────────────────────
 const RE_COMPLETE   = /^完了\s+([\s\S]+)$/;
-const RE_LIST       = /^(タスク)?一覧$/;
-const RE_TODAY      = /^今日のタスク$/;
-const RE_WEEK       = /^今週のタスク$/;
-const RE_HIGH       = /^高優先度(タスク)?$/;
-const RE_PLAN       = /^(今日の計画|今日何する|今日何をする|計画)$/;
+const RE_LIST       = /^(タスク)?一覧$|タスク.*(全部|すべて|全て|一覧|見せ|教えて)|全(部|て)のタスク/;
+const RE_TODAY      = /^今日のタスク$|今日.*(タスク|やること|todo|する事)/i;
+const RE_WEEK       = /^今週のタスク$|今週.*(タスク|やること)/;
+const RE_HIGH       = /^高優先度(タスク)?$|高優先度.*(タスク|教えて|見せ|は)/;
+const RE_PLAN       = /今日の計画|今日何する|今日何をする|今日.*計画|今日.*行動/;
 const RE_PRIORITY   = /^優先度変更\s+(.+)\s+(高|中|低)$/;
 const RE_PROJECT    = /^(.+)のタスク$/;
 const RE_HELP       = /^(ヘルプ|help|使い方|コマンド)$/i;
