@@ -118,6 +118,23 @@ async function handleUpdatePriority(keyword: string, priJa: string, channel: str
   );
 }
 
+function sortByUrgency(tasks: NotionTask[]): NotionTask[] {
+  const today = new Date().toISOString().slice(0, 10);
+  const priOrder: Record<string, number> = { "高": 0, "中": 1, "低": 2 };
+  return [...tasks].sort((a, b) => {
+    const aOver = a.due_date && a.due_date < today ? 0 : 1;
+    const bOver = b.due_date && b.due_date < today ? 0 : 1;
+    if (aOver !== bOver) return aOver - bOver;
+    const aPri = priOrder[a.priority] ?? 2;
+    const bPri = priOrder[b.priority] ?? 2;
+    if (aPri !== bPri) return aPri - bPri;
+    if (a.due_date && b.due_date) return a.due_date.localeCompare(b.due_date);
+    if (a.due_date) return -1;
+    if (b.due_date) return 1;
+    return 0;
+  });
+}
+
 function formatTaskList(tasks: NotionTask[], header: string): string {
   if (tasks.length === 0) return `${header}\n（該当するタスクはありません）`;
   const today = new Date().toISOString().slice(0, 10);
@@ -126,7 +143,8 @@ function formatTaskList(tasks: NotionTask[], header: string): string {
     const due = t.due_date
       ? t.due_date < today ? ` ⚠️期限切れ:${t.due_date}` : ` 📅${t.due_date}`
       : "";
-    return `${i + 1}. ${pri} *${t.title}*${due}`;
+    const genre = t.genre ? ` [${t.genre}]` : "";
+    return `${i + 1}. ${pri} *${t.title}*${genre}${due}`;
   });
   return `${header}\n${lines.join("\n")}\n\n_完了: \`完了 タスク名\` | 変更: \`優先度変更 タスク名 高/中/低\`_`;
 }
@@ -194,15 +212,15 @@ export async function POST(req: NextRequest) {
 
     // ── タスク一覧系 ────────────────────────────────────────
     if (RE_LIST.test(rawText)) {
-      const tasks = await notionQueryTasks({ excludeDone: true });
+      const tasks = sortByUrgency(await notionQueryTasks({ excludeDone: true }));
       await postSlackMessage(channel, formatTaskList(tasks, `📋 *タスク一覧（${tasks.length}件）*`));
       return NextResponse.json({ ok: true });
     }
 
     if (RE_TODAY.test(rawText)) {
-      const today = new Date().toISOString().slice(0, 10);
-      const tasks = await notionQueryTasks({ excludeDone: true, dueOnOrBefore: today });
-      await postSlackMessage(channel, formatTaskList(tasks, `📋 *今日のタスク（${tasks.length}件）*`));
+      const allTasks = await notionQueryTasks({ excludeDone: true });
+      const sorted = sortByUrgency(allTasks);
+      await postSlackMessage(channel, formatTaskList(sorted, `📋 *今日やるべきタスク（${sorted.length}件）*`));
       return NextResponse.json({ ok: true });
     }
 
