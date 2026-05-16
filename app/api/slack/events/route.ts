@@ -122,23 +122,23 @@ function sortByUrgency(tasks: NotionTask[]): NotionTask[] {
   const today = new Date().toISOString().slice(0, 10);
   const priOrder: Record<string, number> = { "高": 0, "中": 1, "低": 2 };
   return [...tasks].sort((a, b) => {
-    const aOver = a.due_date && a.due_date < today ? 0 : 1;
-    const bOver = b.due_date && b.due_date < today ? 0 : 1;
-    if (aOver !== bOver) return aOver - bOver;
-    const aPri = priOrder[a.priority] ?? 2;
-    const bPri = priOrder[b.priority] ?? 2;
-    if (aPri !== bPri) return aPri - bPri;
+    const aOver = !!(a.due_date && a.due_date < today);
+    const bOver = !!(b.due_date && b.due_date < today);
+    // 1位: 期限切れ
+    if (aOver !== bOver) return aOver ? -1 : 1;
+    // 2位: 期限日が近い順（期限ありが先）
     if (a.due_date && b.due_date) return a.due_date.localeCompare(b.due_date);
-    if (a.due_date) return -1;
-    if (b.due_date) return 1;
-    return 0;
+    if (a.due_date && !b.due_date) return -1;
+    if (!a.due_date && b.due_date) return 1;
+    // 3位: 優先度
+    return (priOrder[a.priority] ?? 2) - (priOrder[b.priority] ?? 2);
   });
 }
 
 function formatTaskList(tasks: NotionTask[], header: string): string {
   if (tasks.length === 0) return `${header}\n（該当するタスクはありません）`;
   const today = new Date().toISOString().slice(0, 10);
-  const lines = tasks.slice(0, 15).map((t, i) => {
+  const lines = tasks.slice(0, 5).map((t, i) => {
     const pri = t.priority === "高" ? "🔴" : t.priority === "中" ? "🟡" : "🟢";
     const due = t.due_date
       ? t.due_date < today ? ` ⚠️期限切れ:${t.due_date}` : ` 📅${t.due_date}`

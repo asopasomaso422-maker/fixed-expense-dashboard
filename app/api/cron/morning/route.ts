@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aiMorningSummary } from "../../../../lib/ai";
 import { getUpcomingEvents } from "../../../../lib/googleCalendar";
-import { notionQueryTasks } from "../../../../lib/notion";
+import { notionQueryTasks, notionUpdateTask } from "../../../../lib/notion";
 import { assertCronAuthorized } from "../../../../lib/security";
 import { postSlackMessage } from "../../../../lib/slack";
 
@@ -17,6 +17,12 @@ export async function GET(req: NextRequest) {
       notionQueryTasks({ excludeDone: true }),
       getUpcomingEvents(24),
     ]);
+
+    // 期限日=今日のタスクを自動で「today」ステータスに更新
+    const toPromote = allPending.filter(
+      (t) => t.due_date === today && t.status !== "today" && t.status !== "done"
+    );
+    await Promise.all(toPromote.map((t) => notionUpdateTask(t.id, { status: "today" })));
 
     const overdue    = allPending.filter((t) => t.due_date && t.due_date < today);
     const todayTasks = allPending.filter((t) => t.due_date === today || t.status === "today");
