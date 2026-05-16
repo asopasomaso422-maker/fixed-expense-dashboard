@@ -2,5 +2,8 @@
   "crons": [
     { "path": "/api/cron/morning", "schedule": "0 23 * * *" },
     { "path": "/api/cron/night", "schedule": "30 12 * * *" }
-  ]
+  ],
+  "functions": {
+    "app/api/slack/events/route.ts": { "maxDuration": 60 }
+  }
 }

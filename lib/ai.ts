@@ -3,20 +3,15 @@ import type { NotionTask } from "./notion";
 
 async function generate(apiKey: string, prompt: string): Promise<string> {
   const ai = new GoogleGenAI({ apiKey });
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const res = await ai.models.generateContent({ model: "gemini-2.0-flash", contents: prompt });
-      return res.text?.trim() ?? "";
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("429") && attempt < 2) {
-        await new Promise((r) => setTimeout(r, (attempt + 1) * 3000));
-        continue;
-      }
-      throw e;
-    }
+  try {
+    const res = await ai.models.generateContent({ model: "gemini-2.0-flash", contents: prompt });
+    return res.text?.trim() ?? "";
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // 429はレート制限（60秒窓）なのでリトライせず専用エラーを投げる
+    if (msg.includes("429")) throw new Error("RATE_LIMIT");
+    throw e;
   }
-  return "";
 }
 
 const SECRETARY_PERSONA = `あなたは優秀なビジネス秘書AIです。
@@ -44,8 +39,10 @@ export async function aiChat(question: string, tasks: NotionTask[] = []): Promis
   try {
     return (await generate(apiKey, prompt)) || "回答を生成できませんでした";
   } catch (e) {
-    console.error("[ai] chat error:", e instanceof Error ? e.message : e);
-    return "⚠️ AI応答中にエラーが発生しました。少し待ってから再送してください。";
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "RATE_LIMIT") return "⏱️ AIが混雑中です。1分ほど待ってから再送してください。";
+    console.error("[ai] chat error:", msg);
+    return "⚠️ AI応答中にエラーが発生しました。";
   }
 }
 
@@ -81,7 +78,9 @@ Slack用の見やすいフォーマットで。`;
   try {
     return (await generate(apiKey, prompt)) || "計画を生成できませんでした";
   } catch (e) {
-    console.error("[ai] plan error:", e instanceof Error ? e.message : e);
+    const msg = e instanceof Error ? e.message : "";
+    if (msg === "RATE_LIMIT") return "⏱️ AIが混雑中です。1分ほど待ってから再送してください。";
+    console.error("[ai] plan error:", msg);
     return "⚠️ 計画生成中にエラーが発生しました";
   }
 }
