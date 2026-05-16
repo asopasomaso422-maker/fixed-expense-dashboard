@@ -1,6 +1,24 @@
 import { GoogleGenAI } from "@google/genai";
 import type { NotionTask } from "./notion";
 
+async function generate(apiKey: string, prompt: string): Promise<string> {
+  const ai = new GoogleGenAI({ apiKey });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await ai.models.generateContent({ model: "gemini-2.0-flash", contents: prompt });
+      return res.text?.trim() ?? "";
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("429") && attempt < 2) {
+        await new Promise((r) => setTimeout(r, (attempt + 1) * 3000));
+        continue;
+      }
+      throw e;
+    }
+  }
+  return "";
+}
+
 const SECRETARY_PERSONA = `あなたは優秀なビジネス秘書AIです。
 - 返答は簡潔・的確に日本語で
 - Slack向けに *太字* と絵文字を適度に使う
@@ -24,12 +42,10 @@ export async function aiChat(question: string, tasks: NotionTask[] = []): Promis
 
   const prompt = `${SECRETARY_PERSONA}${buildTaskContext(tasks)}\n\nユーザー: ${question}\n\n秘書:`;
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const res = await ai.models.generateContent({ model: "gemini-2.0-flash", contents: prompt });
-    return res.text?.trim() ?? "回答を生成できませんでした";
+    return (await generate(apiKey, prompt)) || "回答を生成できませんでした";
   } catch (e) {
     console.error("[ai] chat error:", e instanceof Error ? e.message : e);
-    return "⚠️ AI応答中にエラーが発生しました";
+    return "⚠️ AI応答中にエラーが発生しました。少し待ってから再送してください。";
   }
 }
 
@@ -63,9 +79,7 @@ ${list}
 Slack用の見やすいフォーマットで。`;
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const res = await ai.models.generateContent({ model: "gemini-2.0-flash", contents: prompt });
-    return res.text?.trim() ?? "計画を生成できませんでした";
+    return (await generate(apiKey, prompt)) || "計画を生成できませんでした";
   } catch (e) {
     console.error("[ai] plan error:", e instanceof Error ? e.message : e);
     return "⚠️ 計画生成中にエラーが発生しました";
@@ -106,9 +120,7 @@ ${eventList}
 Slack向けに絵文字込みで300文字以内に。`;
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const res = await ai.models.generateContent({ model: "gemini-2.0-flash", contents: prompt });
-    return res.text?.trim() ?? "";
+    return await generate(apiKey, prompt);
   } catch {
     return "";
   }
