@@ -46,7 +46,7 @@ const RE_PRIORITY   = /^優先度変更\s+(.+)\s+(高|中|低)$/;
 const RE_PROJECT    = /^(.+)のタスク$/;
 const RE_HELP       = /^(ヘルプ|help|使い方|コマンド)$/i;
 
-const QUESTION_WORDS = /[？?]|^(どう|何|なぜ|なに|教えて|どれ|いつ|誰|どこ|アドバイス|提案|おすすめ|どう思)/;
+const QUESTION_WORDS = /[？?]|教えて|かな[。?？]?$|^(どう|何|なぜ|なに|どれ|いつ|誰|どこ|アドバイス|提案|おすすめ|どう思)/;
 
 const PRIORITY_MAP: Record<string, string> = { 高: "高", 中: "中", 低: "低" };
 const PROJECTS = ["KANON法人", "ホークリーク", "津幡町SNS", "映像案件", "アプリ開発", "家族", "投資", "その他"];
