@@ -124,6 +124,36 @@ export async function notionFindTask(keyword: string): Promise<NotionTask[]> {
   }
 }
 
+export async function notionArchiveTask(pageId: string): Promise<boolean> {
+  const env = getEnv();
+  if (!env) return false;
+  const { notion } = env;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await notion.pages.update({ page_id: pageId, archived: true } as any);
+    return true;
+  } catch (e) {
+    console.error("[notion] archiveTask ERROR:", e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
+export async function notionDeduplicateTasks(): Promise<{ removed: NotionTask[] }> {
+  const tasks = await notionQueryTasks({});
+  const seen = new Map<string, boolean>();
+  const toRemove: NotionTask[] = [];
+  for (const task of tasks) {
+    const key = task.title.trim().toLowerCase();
+    if (seen.has(key)) {
+      toRemove.push(task);
+    } else {
+      seen.set(key, true);
+    }
+  }
+  await Promise.all(toRemove.map((t) => notionArchiveTask(t.id)));
+  return { removed: toRemove };
+}
+
 export async function notionCompleteTask(pageId: string): Promise<boolean> {
   const env = getEnv();
   if (!env) return false;
