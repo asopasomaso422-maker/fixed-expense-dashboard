@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 
 export type TaskProject =
   | "KANON法人"
@@ -90,15 +90,17 @@ function parseJson(text: string): Classification | null {
 }
 
 export async function classifyTask(title: string): Promise<Classification> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return fallback();
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
-      contents: buildPrompt(title),
+    const client = new OpenAI({ apiKey });
+    const res = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: buildPrompt(title) }],
+      max_tokens: 200,
+      response_format: { type: "json_object" },
     });
-    const text = response.text ?? "";
+    const text = res.choices[0]?.message?.content ?? "";
     return parseJson(text) ?? fallback();
   } catch {
     return fallback();

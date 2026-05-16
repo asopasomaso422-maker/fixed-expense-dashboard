@@ -1,17 +1,16 @@
-import { GoogleGenAI } from "@google/genai";
+import OpenAI from "openai";
 import type { NotionTask } from "./notion";
 
-async function generate(apiKey: string, prompt: string): Promise<string> {
-  const ai = new GoogleGenAI({ apiKey });
-  try {
-    const res = await ai.models.generateContent({ model: "gemini-2.0-flash", contents: prompt });
-    return res.text?.trim() ?? "";
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    // 429はレート制限（60秒窓）なのでリトライせず専用エラーを投げる
-    if (msg.includes("429")) throw new Error("RATE_LIMIT");
-    throw e;
-  }
+async function generate(prompt: string): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OPENAI_API_KEY が未設定です");
+  const client = new OpenAI({ apiKey });
+  const res = await client.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: 1000,
+  });
+  return res.choices[0]?.message?.content?.trim() ?? "";
 }
 
 const SECRETARY_PERSONA = `あなたは優秀なビジネス秘書AIです。
@@ -32,23 +31,16 @@ function buildTaskContext(tasks: NotionTask[]): string {
 }
 
 export async function aiChat(question: string, tasks: NotionTask[] = []): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return "⚠️ GEMINI_API_KEY が未設定です";
-
   const prompt = `${SECRETARY_PERSONA}${buildTaskContext(tasks)}\n\nユーザー: ${question}\n\n秘書:`;
   try {
-    return (await generate(apiKey, prompt)) || "回答を生成できませんでした";
+    return (await generate(prompt)) || "回答を生成できませんでした";
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "";
-    if (msg === "RATE_LIMIT") return "⏱️ AIが混雑中です。1分ほど待ってから再送してください。";
-    console.error("[ai] chat error:", msg);
+    console.error("[ai] chat error:", e instanceof Error ? e.message : e);
     return "⚠️ AI応答中にエラーが発生しました。";
   }
 }
 
 export async function aiPlanToday(tasks: NotionTask[]): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return "⚠️ GEMINI_API_KEY が未設定です";
 
   const today = new Date().toISOString().slice(0, 10);
   if (tasks.length === 0) return "📋 未完了タスクはありません。今日も新しいことに挑戦しましょう！";
@@ -76,18 +68,14 @@ ${list}
 Slack用の見やすいフォーマットで。`;
 
   try {
-    return (await generate(apiKey, prompt)) || "計画を生成できませんでした";
+    return (await generate(prompt)) || "計画を生成できませんでした";
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "";
-    if (msg === "RATE_LIMIT") return "⏱️ AIが混雑中です。1分ほど待ってから再送してください。";
-    console.error("[ai] plan error:", msg);
+    console.error("[ai] plan error:", e instanceof Error ? e.message : e);
     return "⚠️ 計画生成中にエラーが発生しました";
   }
 }
 
 export async function aiMorningSummary(tasks: NotionTask[], events: { summary: string; start: string }[]): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return "";
 
   const today = new Date().toISOString().slice(0, 10);
   const taskList = tasks.slice(0, 10).map((t) => {
@@ -119,7 +107,7 @@ ${eventList}
 Slack向けに絵文字込みで300文字以内に。`;
 
   try {
-    return await generate(apiKey, prompt);
+    return await generate(prompt);
   } catch {
     return "";
   }
