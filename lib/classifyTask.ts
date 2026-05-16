@@ -93,9 +93,12 @@ export async function classifyTask(title: string): Promise<ClassifyResult> {
       contents: buildPrompt(title),
     });
     const text = response.text ?? "";
-    return parseJson(text) ?? fallback();
-
-  } catch {
+    console.log("[classify] raw:", text.slice(0, 200));
+    const result = parseJson(text);
+    console.log("[classify] parsed:", JSON.stringify(result));
+    return result ?? fallback();
+  } catch (e) {
+    console.error("[classify] error:", e instanceof Error ? e.message : e);
     return fallback();
   }
 }

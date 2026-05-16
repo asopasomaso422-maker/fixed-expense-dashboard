@@ -218,6 +218,7 @@ export async function POST(req: NextRequest) {
     // 1件: AIが意図を判定して振り分け
     if (titles.length === 1) {
       const classified = await classifyTask(titles[0]);
+      console.log("[slack] intent:", classified.intent, "| text:", titles[0]);
       if (classified.intent === "question") {
         const tasks = await notionQueryTasks({ excludeDone: true });
         const reply = await aiChat(rawText, tasks);
