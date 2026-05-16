@@ -6,8 +6,10 @@ export type NotionTask = {
   title: string;
   status: string;
   priority: string;
+  importance: string;
   project: string;
   due_date: string | null;
+  memo: string;
 };
 
 function getEnv() {
@@ -24,9 +26,12 @@ function extractTasks(results: unknown[]): NotionTask[] {
     const title = titleArr.map((t) => t.plain_text).join("");
     const status = (p["ステータス"] as { select: { name: string } })?.select?.name ?? "";
     const priority = (p["優先度"] as { select: { name: string } })?.select?.name ?? "";
+    const importance = (p["重要度"] as { select: { name: string } })?.select?.name ?? "";
     const project = (p["プロジェクト"] as { select: { name: string } })?.select?.name ?? "";
     const due_date = (p["期限日"] as { date: { start: string } })?.date?.start ?? null;
-    return { id: (page as { id: string }).id, title, status, priority, project, due_date };
+    const memoArr = (p["メモ"] as { rich_text: Array<{ plain_text: string }> })?.rich_text ?? [];
+    const memo = memoArr.map((t) => t.plain_text).join("");
+    return { id: (page as { id: string }).id, title, status, priority, importance, project, due_date, memo };
   });
 }
 
@@ -41,6 +46,7 @@ export async function notionAddTask(title: string, c: Classification) {
     プロジェクト: { select: { name: c.project } },
     ステータス: { select: { name: c.status } },
     優先度: { select: { name: c.priority } },
+    重要度: { select: { name: c.importance } },
     ソース: { rich_text: [{ text: { content: "slack" } }] },
   };
   if (c.due_date) {
@@ -135,7 +141,9 @@ export async function notionCompleteTask(pageId: string): Promise<boolean> {
 export async function notionUpdateTask(pageId: string, updates: {
   status?: string;
   priority?: string;
+  importance?: string;
   due_date?: string | null;
+  memo?: string;
 }): Promise<boolean> {
   const env = getEnv();
   if (!env) return false;
@@ -145,8 +153,12 @@ export async function notionUpdateTask(pageId: string, updates: {
   const properties: Record<string, any> = {};
   if (updates.status) properties["ステータス"] = { select: { name: updates.status } };
   if (updates.priority) properties["優先度"] = { select: { name: updates.priority } };
+  if (updates.importance) properties["重要度"] = { select: { name: updates.importance } };
   if (updates.due_date !== undefined) {
     properties["期限日"] = updates.due_date ? { date: { start: updates.due_date } } : { date: null };
+  }
+  if (updates.memo !== undefined) {
+    properties["メモ"] = { rich_text: [{ text: { content: updates.memo } }] };
   }
 
   try {

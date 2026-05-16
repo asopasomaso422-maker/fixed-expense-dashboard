@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     const overdue    = allPending.filter((t) => t.due_date && t.due_date < today);
     const todayTasks = allPending.filter((t) => t.due_date === today || t.status === "today");
     const highOther  = allPending
-      .filter((t) => t.priority === "high" && t.due_date !== today && (!t.due_date || t.due_date > today))
+      .filter((t) => t.priority === "高" && t.due_date !== today && (!t.due_date || t.due_date > today))
       .slice(0, 3);
 
     // AI summary (optional, non-blocking)
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
     if (todayTasks.length > 0) {
       lines.push(`\n📋 *今日のタスク（${todayTasks.length}件）*`);
       todayTasks.slice(0, 5).forEach((t) => {
-        const pri = t.priority === "high" ? "🔴" : t.priority === "medium" ? "🟡" : "🟢";
+        const pri = t.priority === "高" ? "🔴" : t.priority === "中" ? "🟡" : "🟢";
         lines.push(`  ${pri} ${t.title}`);
       });
     }

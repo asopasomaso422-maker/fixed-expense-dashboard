@@ -48,7 +48,7 @@ const RE_HELP       = /^(ヘルプ|help|使い方|コマンド)$/i;
 
 const QUESTION_WORDS = /[？?]|^(どう|何|なぜ|なに|教えて|どれ|いつ|誰|どこ|アドバイス|提案|おすすめ|どう思)/;
 
-const PRIORITY_MAP: Record<string, string> = { 高: "high", 中: "medium", 低: "low" };
+const PRIORITY_MAP: Record<string, string> = { 高: "高", 中: "中", 低: "低" };
 const PROJECTS = ["KANON法人", "ホークリーク", "津幡町SNS", "映像案件", "アプリ開発", "家族", "投資", "その他"];
 
 const HELP_TEXT = `*📖 使い方*
@@ -109,7 +109,7 @@ function formatTaskList(tasks: NotionTask[], header: string): string {
   if (tasks.length === 0) return `${header}\n（該当するタスクはありません）`;
   const today = new Date().toISOString().slice(0, 10);
   const lines = tasks.slice(0, 15).map((t, i) => {
-    const pri = t.priority === "high" ? "🔴" : t.priority === "medium" ? "🟡" : "🟢";
+    const pri = t.priority === "高" ? "🔴" : t.priority === "中" ? "🟡" : "🟢";
     const due = t.due_date
       ? t.due_date < today ? ` ⚠️期限切れ:${t.due_date}` : ` 📅${t.due_date}`
       : "";
@@ -196,7 +196,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (RE_HIGH.test(rawText)) {
-      const tasks = await notionQueryTasks({ excludeDone: true, priority: "high" });
+      const tasks = await notionQueryTasks({ excludeDone: true, priority: "高" });
       await postSlackMessage(channel, formatTaskList(tasks, `🔴 *高優先度タスク（${tasks.length}件）*`));
       return NextResponse.json({ ok: true });
     }

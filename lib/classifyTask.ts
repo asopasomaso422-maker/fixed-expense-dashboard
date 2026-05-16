@@ -11,12 +11,14 @@ export type TaskProject =
   | "その他";
 
 export type TaskStatus = "inbox" | "today" | "week" | "later" | "research" | "done";
-export type TaskPriority = "high" | "medium" | "low";
+export type TaskPriority = "高" | "中" | "低";
+export type TaskImportance = "高" | "中" | "低";
 
 export type Classification = {
   project: TaskProject;
   status: TaskStatus;
   priority: TaskPriority;
+  importance: TaskImportance;
   urgency: string;
   impact: string;
   due_date: string | null; // YYYY-MM-DD
@@ -44,18 +46,19 @@ function buildPrompt(title: string): string {
 - その他: 上記に当てはまらない場合
 
 ステータス候補: inbox(未分類), today(今日中), week(今週中), later(いつか), research(調査), done(完了)
-優先度候補: high, medium, low
+優先度候補: 高, 中, 低
+重要度候補: 高（戦略的・長期的に大切）, 中, 低（緊急ではないが知っておくべき）
 
 期限日: 「明日」「今週金曜」「5/20まで」「来週月曜」などが含まれていれば今日の日付を基準に YYYY-MM-DD 形式で返す。期限の記載がなければ null を返す。
 
 返却フォーマット（JSONのみ）:
-{"project":"...","status":"...","priority":"...","urgency":"high|medium|low","impact":"high|medium|low","due_date":"YYYY-MM-DD or null"}
+{"project":"...","status":"...","priority":"高|中|低","importance":"高|中|低","urgency":"high|medium|low","impact":"high|medium|low","due_date":"YYYY-MM-DD or null"}
 
 タスク: ${title}`;
 }
 
 function fallback(): Classification {
-  return { project: "その他", status: "inbox", priority: "medium", urgency: "medium", impact: "medium", due_date: null };
+  return { project: "その他", status: "inbox", priority: "中", importance: "中", urgency: "medium", impact: "medium", due_date: null };
 }
 
 function parseJson(text: string): Classification | null {
