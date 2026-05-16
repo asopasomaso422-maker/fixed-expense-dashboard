@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { aiChat, aiPlanToday } from "../../../../lib/ai";
-import { classifyTask, type Classification } from "../../../../lib/classifyTask";
+import { classifyTask } from "../../../../lib/classifyTask";
 import {
   notionAddTask,
   notionCompleteTask,
@@ -46,6 +46,18 @@ const RE_PRIORITY   = /^優先度変更\s+(.+)\s+(高|中|低)$/;
 const RE_PROJECT    = /^(.+)のタスク$/;
 const RE_HELP       = /^(ヘルプ|help|使い方|コマンド)$/i;
 
+// ── 質問 or タスク判定（Gemini不使用・文法パターン） ──────────
+function isAssistantRequest(text: string): boolean {
+  const t = text.replace(/[。！\s]+$/, "");
+  return (
+    /[？?]/.test(t) ||                                        // 疑問符
+    /て(ください)?$/.test(t) ||                               // 〜して／してください
+    /かな$/.test(t) ||                                        // 〜かな
+    /でしょうか$/.test(t) ||                                  // 〜でしょうか
+    /^(どう|何|なぜ|なに|どれ|いつ|誰|どこ)/.test(t) ||      // 疑問詞始まり
+    /(アドバイス|提案|おすすめ|どう思|教えて|まとめて)/.test(t) // AI依頼語
+  );
+}
 
 const PRIORITY_MAP: Record<string, string> = { 高: "高", 中: "中", 低: "低" };
 const PROJECTS = ["KANON法人", "ホークリーク", "津幡町SNS", "映像案件", "アプリ開発", "家族", "投資", "その他"];
@@ -211,42 +223,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── AI判定: 質問 or タスク追加 ─────────────────────────
-    const titles = splitTasks(rawText);
-    if (titles.length === 0) return NextResponse.json({ ok: true });
-
-    // 1件: AIが意図を判定して振り分け
-    if (titles.length === 1) {
-      const classified = await classifyTask(titles[0]);
-      console.log("[slack] intent:", classified.intent, "| text:", titles[0]);
-      if (classified.intent === "question") {
-        const tasks = await notionQueryTasks({ excludeDone: true });
-        const reply = await aiChat(rawText, tasks);
-        await postSlackMessage(channel, reply);
-        return NextResponse.json({ ok: true });
-      }
-      const c = classified as Classification;
-      await Promise.all([
-        supabaseInsertTask({
-          title: titles[0], memo: "", project: c.project, status: c.status, priority: c.priority,
-          urgency: c.urgency, impact: c.impact,
-          source: "slack", slack_user_id: userId, slack_channel_id: channel,
-        }),
-        notionAddTask(titles[0], c),
-      ]);
-      const pri = c.priority === "高" ? "🔴" : c.priority === "中" ? "🟡" : "🟢";
-      const due = c.due_date ? `\n  📅 期限: ${c.due_date}` : "";
-      await postSlackMessage(channel, `✅ タスクを追加しました\n• ${pri} *${titles[0]}*\n  ${c.project} / ${c.status}${due}`);
+    // ── 質問 → AI回答 ─────────────────────────────────────
+    if (isAssistantRequest(rawText)) {
+      const tasks = await notionQueryTasks({ excludeDone: true });
+      const reply = await aiChat(rawText, tasks);
+      await postSlackMessage(channel, reply);
       return NextResponse.json({ ok: true });
     }
 
-    // 複数行: まとめてタスク追加
+    // ── タスク追加（デフォルト） ────────────────────────────
+    const titles = splitTasks(rawText);
+    if (titles.length === 0) return NextResponse.json({ ok: true });
+
     const results: { title: string; project: string; status: string; priority: string; due_date: string | null }[] = [];
     for (const title of titles) {
-      const classified = await classifyTask(title);
-      const c: Classification = classified.intent === "task"
-        ? (classified as Classification)
-        : { intent: "task", project: "その他", status: "inbox", priority: "中", importance: "中", urgency: "medium", impact: "medium", due_date: null };
+      const c = await classifyTask(title);
       await Promise.all([
         supabaseInsertTask({
           title, memo: "", project: c.project, status: c.status, priority: c.priority,
@@ -256,14 +247,17 @@ export async function POST(req: NextRequest) {
         notionAddTask(title, c),
       ]);
       results.push({ title, project: c.project, status: c.status, priority: c.priority, due_date: c.due_date });
-      await sleep(500);
+      if (titles.length > 1) await sleep(500);
     }
     const lines = results.map(({ title, project, status, priority, due_date }) => {
       const pri = priority === "高" ? "🔴" : priority === "中" ? "🟡" : "🟢";
       const due = due_date ? `\n  📅 期限: ${due_date}` : "";
       return `• ${pri} *${title}*\n  ${project} / ${status}${due}`;
     });
-    await postSlackMessage(channel, `✅ ${results.length}件追加しました\n${lines.join("\n")}`);
+    const reply = results.length === 1
+      ? `✅ タスクを追加しました\n${lines[0]}`
+      : `✅ ${results.length}件追加しました\n${lines.join("\n")}`;
+    await postSlackMessage(channel, reply);
     return NextResponse.json({ ok: true });
 
   } catch (e) {
