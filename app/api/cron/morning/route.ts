@@ -18,14 +18,14 @@ export async function GET(req: NextRequest) {
       getUpcomingEvents(24),
     ]);
 
-    // 期限日=今日のタスクを自動で「today」ステータスに更新
+    // 期限日=今日のタスクを自動で「今日やる」ステータスに更新
     const toPromote = allPending.filter(
-      (t) => t.due_date === today && t.status !== "today" && t.status !== "done"
+      (t) => t.due_date === today && t.status !== "今日やる" && t.status !== "完了"
     );
-    await Promise.all(toPromote.map((t) => notionUpdateTask(t.id, { status: "today" })));
+    await Promise.all(toPromote.map((t) => notionUpdateTask(t.id, { status: "今日やる" })));
 
     const overdue    = allPending.filter((t) => t.due_date && t.due_date < today);
-    const todayTasks = allPending.filter((t) => t.due_date === today || t.status === "today");
+    const todayTasks = allPending.filter((t) => t.due_date === today || t.status === "今日やる");
     const highOther  = allPending
       .filter((t) => t.priority === "高" && t.due_date !== today && (!t.due_date || t.due_date > today))
       .slice(0, 3);

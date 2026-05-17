@@ -47,8 +47,8 @@ export async function aiPlanToday(tasks: NotionTask[]): Promise<string> {
 
   const list = tasks.slice(0, 20).map((t) => {
     const due = t.due_date ? ` / 期限:${t.due_date}` : "";
-    const imp = t.importance ? `/重要度:${t.importance}` : "";
-    return `「${t.title}」優先度:${t.priority}${imp}/${t.status}${due}`;
+    const risk = t.risk && t.risk !== "通常" ? `/リスク:${t.risk}` : "";
+    return `「${t.title}」優先度:${t.priority}${risk}/${t.status}${due}`;
   }).join("\n");
 
   const prompt = `${SECRETARY_PERSONA}
