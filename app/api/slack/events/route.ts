@@ -232,12 +232,20 @@ export async function POST(req: NextRequest) {
     if (RE_TODAY.test(rawText)) {
       const today = new Date().toISOString().slice(0, 10);
       const allTasks = await notionQueryTasks({ excludeDone: true });
-      // status=今日やる OR (due_date=today AND status!=完了)
-      const filtered = allTasks.filter(
-        (t) => t.status === "今日やる" || (t.due_date === today)
+      const todayFiltered = allTasks.filter(
+        (t) => t.status === "今日やる" || t.due_date === today
       );
-      const sorted = sortByUrgency(filtered);
-      await postSlackMessage(channel, formatTaskList(sorted, `📋 *今日やるタスク（${sorted.length}件）*`));
+      if (todayFiltered.length > 0) {
+        const sorted = sortByUrgency(todayFiltered);
+        await postSlackMessage(channel, formatTaskList(sorted, `📋 *今日やるタスク（${sorted.length}件）*`));
+      } else {
+        // 今日指定がなければ全未完了タスクを表示
+        const sorted = sortByUrgency(allTasks);
+        const note = allTasks.length > 0
+          ? `📋 *今日指定のタスクはありません*\n\n以下は全未完了タスク（${allTasks.length}件）から上位です：`
+          : `📋 *タスクはまだありません*`;
+        await postSlackMessage(channel, formatTaskList(sorted, note));
+      }
       return NextResponse.json({ ok: true });
     }
 
