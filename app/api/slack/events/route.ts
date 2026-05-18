@@ -51,6 +51,9 @@ const RE_RISK       = /危険|注意|放置|やばい/;
 // ── 質問 or タスク判定（文法パターン） ──────────────────────
 function isAssistantRequest(text: string): boolean {
   const t = text.replace(/[。！\s]+$/, "");
+  // タスク追加系のパターンは除外（「〜入れておいて」「追加して」など）
+  if (/おいて(ください)?$/.test(t)) return false;
+  if (/(入れて|追加して|登録して|タスクに)(ください)?$/.test(t)) return false;
   return (
     /[？?]/.test(t) ||                                        // 疑問符
     /て(ください)?$/.test(t) ||                               // 〜して／してください
