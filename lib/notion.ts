@@ -3,15 +3,35 @@ import type { Classification } from "./classifyTask";
 export type NotionTask = {
   id: string;
   title: string;
-  status: string;      // 未着手/今日やる/今週やる/後回し/完了
+  status: string;      // inbox/today/week/later/done
   priority: string;    // 高/中/低
-  category: string;    // 売上/法務税務/etc
+  category: string;    // 編集/企画/撮影/etc.
   source: string;
   originalText: string;
   due_date: string | null;
-  risk: string;        // 通常/注意/危険
+  risk: string;        // 重要度: 高/中/低
   nextAction: string;
   createdAt: string;
+};
+
+// status英語 → 日本語表示
+export const STATUS_JA: Record<string, string> = {
+  inbox:    "未着手",
+  today:    "今日やる",
+  week:     "今週やる",
+  later:    "後回し",
+  research: "調査中",
+  done:     "完了",
+};
+
+// 日本語 → status英語（書き込み用）
+export const STATUS_EN: Record<string, string> = {
+  "未着手":  "inbox",
+  "今日やる": "today",
+  "今週やる": "week",
+  "後回し":  "later",
+  "調査中":  "research",
+  "完了":    "done",
 };
 
 async function notionFetch(path: string, method: string, body?: object) {
@@ -41,23 +61,33 @@ function extractTasks(results: unknown[]): NotionTask[] {
     const titleArr = (props.Name as { title: Array<{ plain_text: string }> })?.title ?? [];
     const title = titleArr.map((t) => t.plain_text).join("");
 
-    const status = (props.Status as { select: { name: string } })?.select?.name ?? "";
-    const priority = (props.Priority as { select: { name: string } })?.select?.name ?? "";
-    const category = (props.Category as { select: { name: string } })?.select?.name ?? "";
-    const source = (props.Source as { select: { name: string } })?.select?.name ?? "";
+    const statusRaw = (props["ステータス"] as { select: { name: string } })?.select?.name ?? "inbox";
+    const status  = STATUS_JA[statusRaw] ?? statusRaw;
+    const priority = (props["優先度"]   as { select: { name: string } })?.select?.name ?? "中";
+    const category = (props["ジャンル"] as { select: { name: string } })?.select?.name ?? "その他";
+    const risk     = (props["重要度"]   as { select: { name: string } })?.select?.name ?? "中";
 
-    const origArr = (props.OriginalText as { rich_text: Array<{ plain_text: string }> })?.rich_text ?? [];
-    const originalText = origArr.map((t) => t.plain_text).join("");
+    const srcArr = (props["ソース"] as { rich_text: Array<{ plain_text: string }> })?.rich_text ?? [];
+    const source = srcArr.map((t) => t.plain_text).join("");
 
-    const due_date = (props.DueDate as { date: { start: string } })?.date?.start ?? null;
-    const risk = (props.Risk as { select: { name: string } })?.select?.name ?? "";
+    const memoArr = (props["メモ"] as { rich_text: Array<{ plain_text: string }> })?.rich_text ?? [];
+    const nextAction = memoArr.map((t) => t.plain_text).join("");
 
-    const naArr = (props.NextAction as { rich_text: Array<{ plain_text: string }> })?.rich_text ?? [];
-    const nextAction = naArr.map((t) => t.plain_text).join("");
+    const due_date = (props["期限日"] as { date: { start: string } })?.date?.start ?? null;
 
-    const createdAt = (props.CreatedAt as { date: { start: string } })?.date?.start ?? "";
-
-    return { id: p.id, title, status, priority, category, source, originalText, due_date, risk, nextAction, createdAt };
+    return {
+      id: p.id,
+      title,
+      status,
+      priority,
+      category,
+      source,
+      originalText: title,
+      due_date,
+      risk,
+      nextAction,
+      createdAt: "",
+    };
   });
 }
 
@@ -65,25 +95,29 @@ function extractTasks(results: unknown[]): NotionTask[] {
 
 export async function notionQueryTasks(options: {
   excludeDone?: boolean;
-  dueOnOrBefore?: string;
-  dueOnOrAfter?: string;
-  status?: string;
+  status?: string;        // 日本語 or 英語どちらでも可
   priority?: string;
   risk?: string;
 } = {}): Promise<NotionTask[]> {
   const dbId = process.env.NOTION_TASKS_DATABASE_ID;
-  if (!dbId) {
-    throw new Error("NOTION_TASKS_DATABASE_IDが未設定です");
-  }
+  if (!dbId) throw new Error("NOTION_TASKS_DATABASE_IDが未設定");
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const filters: any[] = [];
-  if (options.excludeDone) filters.push({ property: "Status", select: { does_not_equal: "完了" } });
-  if (options.status) filters.push({ property: "Status", select: { equals: options.status } });
-  if (options.priority) filters.push({ property: "Priority", select: { equals: options.priority } });
-  if (options.risk) filters.push({ property: "Risk", select: { equals: options.risk } });
-  if (options.dueOnOrBefore) filters.push({ property: "DueDate", date: { on_or_before: options.dueOnOrBefore } });
-  if (options.dueOnOrAfter) filters.push({ property: "DueDate", date: { on_or_after: options.dueOnOrAfter } });
+
+  if (options.excludeDone) {
+    filters.push({ property: "ステータス", select: { does_not_equal: "done" } });
+  }
+  if (options.status) {
+    const en = STATUS_EN[options.status] ?? options.status;
+    filters.push({ property: "ステータス", select: { equals: en } });
+  }
+  if (options.priority) {
+    filters.push({ property: "優先度", select: { equals: options.priority } });
+  }
+  if (options.risk) {
+    filters.push({ property: "重要度", select: { equals: options.risk } });
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const filter: any = filters.length === 0 ? undefined
@@ -92,8 +126,8 @@ export async function notionQueryTasks(options: {
 
   try {
     const body: Record<string, unknown> = {
-      sorts: [{ property: "DueDate", direction: "ascending" }],
-      page_size: 30,
+      sorts: [{ property: "期限日", direction: "ascending" }],
+      page_size: 50,
     };
     if (filter) body.filter = filter;
 
@@ -108,24 +142,23 @@ export async function notionQueryTasks(options: {
 export async function notionAddTask(title: string, classification: Classification) {
   const dbId = process.env.NOTION_TASKS_DATABASE_ID;
   if (!dbId) {
-    console.error("[notion] NOTION_TASKS_DATABASE_IDが未設定です");
+    console.error("[notion] NOTION_TASKS_DATABASE_IDが未設定");
     return;
   }
 
+  const statusEn = STATUS_EN[classification.status] ?? "inbox";
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const properties: Record<string, any> = {
-    Name:         { title: [{ text: { content: title } }] },
-    Status:       { select: { name: classification.status } },
-    Priority:     { select: { name: classification.priority } },
-    Category:     { select: { name: classification.category } },
-    Source:       { select: { name: classification.source } },
-    OriginalText: { rich_text: [{ text: { content: classification.originalText } }] },
-    Risk:         { select: { name: classification.risk } },
-    NextAction:   { rich_text: [{ text: { content: classification.nextAction } }] },
-    CreatedAt:    { date: { start: new Date().toISOString().slice(0, 10) } },
+    Name:      { title: [{ text: { content: title } }] },
+    ステータス: { select: { name: statusEn } },
+    優先度:    { select: { name: classification.priority } },
+    重要度:    { select: { name: classification.risk === "危険" ? "高" : classification.risk === "注意" ? "中" : "低" } },
+    ジャンル:  { select: { name: classification.category } },
+    ソース:    { rich_text: [{ text: { content: "Slack" } }] },
   };
   if (classification.due_date) {
-    properties.DueDate = { date: { start: classification.due_date } };
+    properties["期限日"] = { date: { start: classification.due_date } };
   }
 
   try {
@@ -141,10 +174,7 @@ export async function notionFindTask(keyword: string): Promise<NotionTask[]> {
 
   try {
     const res = await notionFetch(`databases/${dbId}/query`, "POST", {
-      filter: {
-        property: "Name",
-        title: { contains: keyword },
-      },
+      filter: { property: "Name", title: { contains: keyword } },
       page_size: 10,
     });
     return extractTasks(res.results ?? []);
@@ -157,9 +187,7 @@ export async function notionFindTask(keyword: string): Promise<NotionTask[]> {
 export async function notionCompleteTask(pageId: string): Promise<boolean> {
   try {
     await notionFetch(`pages/${pageId}`, "PATCH", {
-      properties: {
-        Status: { select: { name: "完了" } },
-      },
+      properties: { ステータス: { select: { name: "done" } } },
     });
     return true;
   } catch (e) {
@@ -171,22 +199,24 @@ export async function notionCompleteTask(pageId: string): Promise<boolean> {
 export async function notionUpdateTask(pageId: string, updates: {
   status?: string;
   priority?: string;
-  category?: string;
-  due_date?: string | null;
   risk?: string;
+  due_date?: string | null;
   nextAction?: string;
   originalText?: string;
+  category?: string;
 }): Promise<boolean> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const properties: Record<string, any> = {};
-  if (updates.status !== undefined)       properties.Status       = { select: { name: updates.status } };
-  if (updates.priority !== undefined)     properties.Priority     = { select: { name: updates.priority } };
-  if (updates.category !== undefined)     properties.Category     = { select: { name: updates.category } };
-  if (updates.risk !== undefined)         properties.Risk         = { select: { name: updates.risk } };
-  if (updates.nextAction !== undefined)   properties.NextAction   = { rich_text: [{ text: { content: updates.nextAction } }] };
-  if (updates.originalText !== undefined) properties.OriginalText = { rich_text: [{ text: { content: updates.originalText } }] };
+  if (updates.status !== undefined) {
+    const en = STATUS_EN[updates.status] ?? updates.status;
+    properties["ステータス"] = { select: { name: en } };
+  }
+  if (updates.priority !== undefined)   properties["優先度"]  = { select: { name: updates.priority } };
+  if (updates.risk !== undefined)       properties["重要度"]  = { select: { name: updates.risk } };
+  if (updates.category !== undefined)   properties["ジャンル"] = { select: { name: updates.category } };
+  if (updates.nextAction !== undefined) properties["メモ"]    = { rich_text: [{ text: { content: updates.nextAction } }] };
   if (updates.due_date !== undefined) {
-    properties.DueDate = updates.due_date ? { date: { start: updates.due_date } } : { date: null };
+    properties["期限日"] = updates.due_date ? { date: { start: updates.due_date } } : { date: null };
   }
 
   try {
@@ -214,12 +244,12 @@ export async function notionDeduplicateTasks(): Promise<{ removed: NotionTask[] 
 
   try {
     const res = await notionFetch(`databases/${dbId}/query`, "POST", {
-      filter: { property: "Status", select: { does_not_equal: "完了" } },
+      filter: { property: "ステータス", select: { does_not_equal: "done" } },
       page_size: 100,
     });
     const tasks = extractTasks(res.results ?? []);
 
-    const seen = new Map<string, string>(); // normalizedTitle -> first pageId
+    const seen = new Map<string, string>();
     const removed: NotionTask[] = [];
 
     for (const task of tasks) {
@@ -247,10 +277,7 @@ export async function notionAddInbox(data: {
   summary?: string;
 }): Promise<void> {
   const dbId = process.env.NOTION_INBOX_DATABASE_ID;
-  if (!dbId) {
-    console.error("[notion] NOTION_INBOX_DATABASE_IDが未設定です");
-    return;
-  }
+  if (!dbId) return;
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
