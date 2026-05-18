@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { aiChat, aiPlanToday } from "../../../../lib/ai";
+import { aiChat, aiPlanToday, aiAnalyzeImage } from "../../../../lib/ai";
 import { classifyTask } from "../../../../lib/classifyTask";
 import {
   notionQueryTasks,
@@ -200,10 +200,35 @@ export async function POST(req: NextRequest) {
     if (!isTarget) return NextResponse.json({ ok: true });
 
     const rawText = String(event.text || "").replace(/<@\w+>/g, "").replace(/\s+/g, " ").trim();
-    if (!rawText) return NextResponse.json({ ok: true });
-
     const channel = String(event.channel);
     const userId = String(event.user || "");
+
+    // ── 画像添付 → Vision AI ──────────────────────────────
+    type SlackFile = { mimetype: string; url_private: string };
+    const files = (event.files ?? event.attachments?.filter((a: { mimetype?: string }) => a.mimetype)) as SlackFile[] | undefined;
+    const imageFile = files?.find((f) => f.mimetype?.startsWith("image/"));
+    if (imageFile) {
+      if (!process.env.OPENAI_API_KEY) {
+        await postSlackMessage(channel, "⚠️ AI機能が無効です（OPENAI_API_KEY未設定）");
+        return NextResponse.json({ ok: true });
+      }
+      await postSlackMessage(channel, "🔍 画像を分析中...");
+      const imgRes = await fetch(imageFile.url_private, {
+        headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
+      });
+      if (!imgRes.ok) {
+        await postSlackMessage(channel, "❌ 画像のダウンロードに失敗しました。Botに`files:read`スコープがあるか確認してください。");
+        return NextResponse.json({ ok: true });
+      }
+      const imgBuffer = await imgRes.arrayBuffer();
+      const base64 = Buffer.from(imgBuffer).toString("base64");
+      const dataUrl = `data:${imageFile.mimetype};base64,${base64}`;
+      const reply = await aiAnalyzeImage(rawText, dataUrl);
+      await postSlackMessage(channel, reply);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (!rawText) return NextResponse.json({ ok: true });
 
     // Notion DB接続チェック
     if (!process.env.NOTION_TASKS_DATABASE_ID) {

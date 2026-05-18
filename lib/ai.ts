@@ -75,6 +75,29 @@ Slack用の見やすいフォーマットで。`;
   }
 }
 
+export async function aiAnalyzeImage(question: string, imageDataUrl: string): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return "⚠️ OPENAI_API_KEYが未設定です。";
+  try {
+    const client = new OpenAI({ apiKey });
+    const res = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: question || "この画像について教えてください。" },
+          { type: "image_url", image_url: { url: imageDataUrl } },
+        ],
+      }],
+      max_tokens: 1000,
+    });
+    return res.choices[0]?.message?.content?.trim() ?? "画像を解析できませんでした。";
+  } catch (e) {
+    console.error("[ai] image error:", e instanceof Error ? e.message : e);
+    return "⚠️ 画像分析中にエラーが発生しました。";
+  }
+}
+
 export async function aiMorningSummary(tasks: NotionTask[], events: { summary: string; start: string }[]): Promise<string> {
 
   const today = new Date().toISOString().slice(0, 10);
