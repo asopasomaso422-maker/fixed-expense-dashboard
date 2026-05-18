@@ -28,10 +28,22 @@ function verifySlackSignature(req: NextRequest, rawBody: string): boolean {
 }
 
 function splitTasks(text: string): string[] {
-  return text
-    .split(/[,、\n]+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  // 括弧内のカンマはタスク区切りとみなさない
+  const result: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of text) {
+    if ("（(「【".includes(ch)) depth++;
+    else if ("）)」】".includes(ch)) depth = Math.max(0, depth - 1);
+    else if (depth === 0 && /[,、\n]/.test(ch)) {
+      if (current.trim()) result.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) result.push(current.trim());
+  return result;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -47,6 +59,8 @@ const RE_PRIORITY   = /^優先度変更\s+(.+)\s+(高|中|低)$/;
 const RE_HELP       = /^(ヘルプ|help|使い方|コマンド)$/i;
 const RE_DEDUP      = /重複/;
 const RE_RISK       = /危険|注意|放置|やばい/;
+const RE_SET_TODAY  = /^今日に?(追加|入れて?|移動)\s+([\s\S]+)$|^([\s\S]+?)を?今日に?(追加|入れて?|移動)$/;
+const RE_UNSET_TODAY = /^今日から(外す|削除|取り消し|戻す)\s+([\s\S]+)$/;
 
 // ── 質問 or タスク判定（文法パターン） ──────────────────────
 function isAssistantRequest(text: string): boolean {
@@ -80,6 +94,8 @@ const HELP_TEXT = `*📖 使い方*
 *タスク操作*
 • \`完了 タスク名\` — 完了にする
 • \`優先度変更 タスク名 高/中/低\` — 優先度を変更
+• \`今日に追加 タスク名\` — 今日やるタスクに移動
+• \`今日から外す タスク名\` — 今日のタスクから外す（未着手に戻す）
 • \`重複削除\` — 重複タスクを削除
 
 *AI秘書*
@@ -290,8 +306,42 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    // ── 今日に追加 ─────────────────────────────────────────
+    const setTodayM = RE_SET_TODAY.exec(rawText);
+    if (setTodayM) {
+      const keyword = (setTodayM[2] || setTodayM[3] || "").trim();
+      if (keyword) {
+        const found = await notionFindTask(keyword);
+        if (found.length === 0) {
+          await postSlackMessage(channel, `❌ 「${keyword}」に一致するタスクが見つかりませんでした`);
+        } else {
+          await notionUpdateTask(found[0].id, { status: "今日やる" });
+          await postSlackMessage(channel, `📋 *今日のタスクに追加しました*: ${found[0].title}`);
+        }
+        return NextResponse.json({ ok: true });
+      }
+    }
+
+    // ── 今日から外す ────────────────────────────────────────
+    const unsetTodayM = RE_UNSET_TODAY.exec(rawText);
+    if (unsetTodayM) {
+      const keyword = unsetTodayM[2].trim();
+      const found = await notionFindTask(keyword);
+      if (found.length === 0) {
+        await postSlackMessage(channel, `❌ 「${keyword}」に一致するタスクが見つかりませんでした`);
+      } else {
+        await notionUpdateTask(found[0].id, { status: "未着手" });
+        await postSlackMessage(channel, `↩️ 今日のタスクから外しました: ${found[0].title}`);
+      }
+      return NextResponse.json({ ok: true });
+    }
+
     // ── 質問 → AI回答 ─────────────────────────────────────
     if (isAssistantRequest(rawText)) {
+      if (!process.env.OPENAI_API_KEY) {
+        await postSlackMessage(channel, "💬 AI機能はOPENAI_API_KEYが設定されていないため使えません。タスク管理コマンドは引き続き使えます。`ヘルプ`で一覧を確認してください。");
+        return NextResponse.json({ ok: true });
+      }
       const tasks = await notionQueryTasks({ excludeDone: true });
       const reply = await aiChat(rawText, tasks);
       await postSlackMessage(channel, reply);
