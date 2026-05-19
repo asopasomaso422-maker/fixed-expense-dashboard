@@ -1,45 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUnreadGmailsToday, type GmailMessage } from "../../../../lib/gmail";
+import { getUnreadGmailsToday } from "../../../../lib/gmail";
 import { getUpcomingEvents } from "../../../../lib/googleCalendar";
-import { notionQueryTasks, notionUpdateTask, type NotionTask } from "../../../../lib/notion";
+import { notionQueryTasks, notionUpdateTask } from "../../../../lib/notion";
 import { assertCronAuthorized } from "../../../../lib/security";
 import { postSlackMessage } from "../../../../lib/slack";
-
-// タスクを緊急度順にソート
-function sortByUrgency(tasks: NotionTask[]): NotionTask[] {
-  const today = new Date().toISOString().slice(0, 10);
-  const priOrder: Record<string, number> = { "高": 0, "中": 1, "低": 2 };
-  const statusOrder: Record<string, number> = { "今日やる": 0, "今週やる": 1, "未着手": 2, "後回し": 3 };
-  return [...tasks].sort((a, b) => {
-    const aOver = !!(a.due_date && a.due_date < today);
-    const bOver = !!(b.due_date && b.due_date < today);
-    if (aOver !== bOver) return aOver ? -1 : 1;
-    const statusDiff = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
-    if (statusDiff !== 0) return statusDiff;
-    if (a.due_date && b.due_date) return a.due_date.localeCompare(b.due_date);
-    if (a.due_date && !b.due_date) return -1;
-    if (!a.due_date && b.due_date) return 1;
-    return (priOrder[a.priority] ?? 2) - (priOrder[b.priority] ?? 2);
-  });
-}
-
-// 返信が必要そうなメールだけ抽出
-const SKIP_PATTERNS = [
-  /noreply|no-reply|donotreply|do-not-reply/i,
-  /newsletter|magazine|mailing|mailchimp|sendgrid|substack/i,
-  /notification|alert|update|confirm|verify|receipt|invoice/i,
-  /info@|support@|help@|admin@|system@|service@|team@/i,
-  /google|twitter|facebook|instagram|linkedin|notion|slack|zoom/i,
-];
-
-function filterReplyNeeded(emails: GmailMessage[]): GmailMessage[] {
-  return emails.filter((m) => {
-    const from = m.from.toLowerCase();
-    const subj = m.subject.toLowerCase();
-    if (SKIP_PATTERNS.some((p) => p.test(from) || p.test(subj))) return false;
-    return true;
-  });
-}
+import { aiSelectMorningTasks, aiFilterReplyEmails } from "../../../../lib/ai";
 
 export async function GET(req: NextRequest) {
   try {
@@ -64,10 +29,10 @@ export async function GET(req: NextRequest) {
     );
     await Promise.all(toPromote.map((t) => notionUpdateTask(t.id, { status: "今日やる" })));
 
-    const sorted = sortByUrgency(allPending);
-    const top3   = sorted.slice(0, 3);
-    const next3  = sorted.slice(3, 6);
-    const replyNeeded = filterReplyNeeded(gmailUnread);
+    const [{ top3, next3 }, replyNeeded] = await Promise.all([
+      aiSelectMorningTasks(allPending),
+      aiFilterReplyEmails(gmailUnread),
+    ]);
 
     const lines: string[] = [
       `🌅 *おはようございます！${jstDate}*`,

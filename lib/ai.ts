@@ -98,6 +98,79 @@ export async function aiAnalyzeImage(question: string, imageDataUrl: string): Pr
   }
 }
 
+export async function aiSelectMorningTasks(
+  tasks: NotionTask[]
+): Promise<{ top3: NotionTask[]; next3: NotionTask[] }> {
+  if (tasks.length === 0) return { top3: [], next3: [] };
+
+  const today = new Date().toISOString().slice(0, 10);
+  const list = tasks.map((t, i) => {
+    const due = t.due_date ? ` 期限:${t.due_date}` : "";
+    const overdue = t.due_date && t.due_date < today ? "【期限切れ】" : "";
+    return `${i}: ${overdue}${t.title} [状態:${t.status} 優先度:${t.priority}${due}]`;
+  }).join("\n");
+
+  const prompt = `今日は${today}です。以下のタスクリストから優先度・緊急度を判断して、インデックス番号で回答してください。
+
+タスク:
+${list}
+
+以下のJSON形式で回答（理由は不要）:
+{"top3":[0,1,2],"next3":[3,4,5]}
+
+条件:
+- top3: 今日絶対にやるべき最重要3件（期限切れ・今日期限・今日やるステータスを優先）
+- next3: 追加でやると良い3件
+- インデックスは重複なし、タスク数が足りなければ少なくて良い
+JSONのみ返してください。`;
+
+  try {
+    const raw = await generate(prompt);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("no JSON");
+    const parsed = JSON.parse(match[0]) as { top3?: number[]; next3?: number[] };
+    const top3 = (parsed.top3 ?? []).map((i) => tasks[i]).filter(Boolean);
+    const next3 = (parsed.next3 ?? []).map((i) => tasks[i]).filter(Boolean);
+    return { top3, next3 };
+  } catch {
+    const sorted = [...tasks].sort((a, b) => {
+      const aToday = a.status === "今日やる" ? 0 : 1;
+      const bToday = b.status === "今日やる" ? 0 : 1;
+      return aToday - bToday;
+    });
+    return { top3: sorted.slice(0, 3), next3: sorted.slice(3, 6) };
+  }
+}
+
+import type { GmailMessage } from "./gmail";
+
+export async function aiFilterReplyEmails(emails: GmailMessage[]): Promise<GmailMessage[]> {
+  if (emails.length === 0) return [];
+
+  const list = emails.map((m, i) => `${i}: From: ${m.from} / Subject: ${m.subject} / Preview: ${m.snippet}`).join("\n");
+
+  const prompt = `以下のメールのうち、実在する個人から届いた返信が必要なメールのインデックス番号を選んでください。
+
+メール:
+${list}
+
+判断基準:
+- 選ぶ: 個人名（名前）から届いたメール、取引先や知人からのメール、明らかに返信を期待している内容
+- 選ばない: ニュースレター、自動通知、サービス系メール、no-reply系、確認メール、広告
+
+JSONのみ返してください: {"indices":[0,1,2]}`;
+
+  try {
+    const raw = await generate(prompt);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) return [];
+    const parsed = JSON.parse(match[0]) as { indices?: number[] };
+    return (parsed.indices ?? []).map((i) => emails[i]).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export async function aiMorningSummary(tasks: NotionTask[], events: { summary: string; start: string }[]): Promise<string> {
 
   const today = new Date().toISOString().slice(0, 10);
