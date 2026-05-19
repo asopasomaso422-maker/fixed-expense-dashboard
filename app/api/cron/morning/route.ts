@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aiMorningSummary } from "../../../../lib/ai";
+import { getUnreadGmailsToday } from "../../../../lib/gmail";
 import { getUpcomingEvents } from "../../../../lib/googleCalendar";
 import { notionQueryTasks, notionUpdateTask } from "../../../../lib/notion";
 import { assertCronAuthorized } from "../../../../lib/security";
@@ -13,9 +14,10 @@ export async function GET(req: NextRequest) {
 
     const today = new Date().toISOString().slice(0, 10);
 
-    const [allPending, events] = await Promise.all([
+    const [allPending, events, gmailUnread] = await Promise.all([
       notionQueryTasks({ excludeDone: true }),
       getUpcomingEvents(24),
+      getUnreadGmailsToday(),
     ]);
 
     // 期限日=今日のタスクを自動で「今日やる」ステータスに更新
@@ -68,6 +70,15 @@ export async function GET(req: NextRequest) {
           ? new Date(e.start).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" })
           : "終日";
         lines.push(`  🗓 ${time} ${e.summary}`);
+      });
+    }
+
+    if (gmailUnread.length > 0) {
+      lines.push(`\n📧 *Gmail未読（${gmailUnread.length}件）*`);
+      gmailUnread.slice(0, 5).forEach((m) => {
+        const from = m.from.replace(/<[^>]+>/, "").trim() || m.from;
+        lines.push(`  📨 *${m.subject || "(件名なし)"}*`);
+        lines.push(`     _${from}_`);
       });
     }
 
