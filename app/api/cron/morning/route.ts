@@ -1,10 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
-import { aiMorningSummary } from "../../../../lib/ai";
-import { getUnreadGmailsToday } from "../../../../lib/gmail";
+import { getUnreadGmailsToday, type GmailMessage } from "../../../../lib/gmail";
 import { getUpcomingEvents } from "../../../../lib/googleCalendar";
-import { notionQueryTasks, notionUpdateTask } from "../../../../lib/notion";
+import { notionQueryTasks, notionUpdateTask, type NotionTask } from "../../../../lib/notion";
 import { assertCronAuthorized } from "../../../../lib/security";
 import { postSlackMessage } from "../../../../lib/slack";
+
+// タスクを緊急度順にソート
+function sortByUrgency(tasks: NotionTask[]): NotionTask[] {
+  const today = new Date().toISOString().slice(0, 10);
+  const priOrder: Record<string, number> = { "高": 0, "中": 1, "低": 2 };
+  const statusOrder: Record<string, number> = { "今日やる": 0, "今週やる": 1, "未着手": 2, "後回し": 3 };
+  return [...tasks].sort((a, b) => {
+    const aOver = !!(a.due_date && a.due_date < today);
+    const bOver = !!(b.due_date && b.due_date < today);
+    if (aOver !== bOver) return aOver ? -1 : 1;
+    const statusDiff = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
+    if (statusDiff !== 0) return statusDiff;
+    if (a.due_date && b.due_date) return a.due_date.localeCompare(b.due_date);
+    if (a.due_date && !b.due_date) return -1;
+    if (!a.due_date && b.due_date) return 1;
+    return (priOrder[a.priority] ?? 2) - (priOrder[b.priority] ?? 2);
+  });
+}
+
+// 返信が必要そうなメールだけ抽出
+const SKIP_PATTERNS = [
+  /noreply|no-reply|donotreply|do-not-reply/i,
+  /newsletter|magazine|mailing|mailchimp|sendgrid|substack/i,
+  /notification|alert|update|confirm|verify|receipt|invoice/i,
+  /info@|support@|help@|admin@|system@|service@|team@/i,
+  /google|twitter|facebook|instagram|linkedin|notion|slack|zoom/i,
+];
+
+function filterReplyNeeded(emails: GmailMessage[]): GmailMessage[] {
+  return emails.filter((m) => {
+    const from = m.from.toLowerCase();
+    const subj = m.subject.toLowerCase();
+    if (SKIP_PATTERNS.some((p) => p.test(from) || p.test(subj))) return false;
+    return true;
+  });
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -13,6 +48,9 @@ export async function GET(req: NextRequest) {
     if (!channel) throw new Error("SLACK_DEFAULT_CHANNEL_ID が未設定です。");
 
     const today = new Date().toISOString().slice(0, 10);
+    const jstDate = new Date().toLocaleDateString("ja-JP", {
+      timeZone: "Asia/Tokyo", month: "long", day: "numeric", weekday: "short",
+    });
 
     const [allPending, events, gmailUnread] = await Promise.all([
       notionQueryTasks({ excludeDone: true }),
@@ -20,70 +58,75 @@ export async function GET(req: NextRequest) {
       getUnreadGmailsToday(),
     ]);
 
-    // 期限日=今日のタスクを自動で「今日やる」ステータスに更新
+    // 期限日=今日のタスクを自動で「今日やる」に昇格
     const toPromote = allPending.filter(
       (t) => t.due_date === today && t.status !== "今日やる" && t.status !== "完了"
     );
     await Promise.all(toPromote.map((t) => notionUpdateTask(t.id, { status: "今日やる" })));
 
-    const overdue    = allPending.filter((t) => t.due_date && t.due_date < today);
-    const todayTasks = allPending.filter((t) => t.due_date === today || t.status === "今日やる");
-    const highOther  = allPending
-      .filter((t) => t.priority === "高" && t.due_date !== today && (!t.due_date || t.due_date > today))
-      .slice(0, 3);
+    const sorted = sortByUrgency(allPending);
+    const top3   = sorted.slice(0, 3);
+    const next3  = sorted.slice(3, 6);
+    const replyNeeded = filterReplyNeeded(gmailUnread);
 
-    // AI summary (optional, non-blocking)
-    const aiSummary = await aiMorningSummary(allPending, events);
+    const lines: string[] = [
+      `🌅 *おはようございます！${jstDate}*`,
+      "───────────────────────",
+    ];
 
-    const lines: string[] = ["🌅 *おはようございます！*", "───────────────────────"];
-
-    if (aiSummary) {
-      lines.push(aiSummary);
-      lines.push("───────────────────────");
-    }
-
-    if (overdue.length > 0) {
-      lines.push(`⚠️ *期限切れ（${overdue.length}件）*`);
-      overdue.slice(0, 5).forEach((t) => lines.push(`  • 🔴 ${t.title}（${t.due_date}）`));
-    }
-
-    if (todayTasks.length > 0) {
-      lines.push(`\n📋 *今日のタスク（${todayTasks.length}件）*`);
-      todayTasks.slice(0, 5).forEach((t) => {
-        const pri = t.priority === "高" ? "🔴" : t.priority === "中" ? "🟡" : "🟢";
-        lines.push(`  ${pri} ${t.title}`);
-      });
-    }
-
-    if (highOther.length > 0) {
-      lines.push(`\n🎯 *高優先度（その他）*`);
-      highOther.forEach((t) => {
-        const due = t.due_date ? ` 📅${t.due_date}` : "";
-        lines.push(`  🔴 ${t.title}${due}`);
-      });
-    }
-
+    // 今日の予定（あれば最初に）
     if (events.length > 0) {
-      lines.push(`\n📅 *今日の予定（${events.length}件）*`);
+      lines.push(`📅 *今日の予定*`);
       events.forEach((e) => {
         const time = e.start.includes("T")
-          ? new Date(e.start).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo" })
+          ? new Date(e.start).toLocaleTimeString("ja-JP", {
+              hour: "2-digit", minute: "2-digit", timeZone: "Asia/Tokyo",
+            })
           : "終日";
-        lines.push(`  🗓 ${time} ${e.summary}`);
+        lines.push(`  🗓 ${time}　${e.summary}`);
+      });
+      lines.push("");
+    }
+
+    // 優先タスク TOP3
+    lines.push("🔴 *今日やるべきタスク TOP3*");
+    if (top3.length === 0) {
+      lines.push("  （未完了タスクはありません）");
+    } else {
+      top3.forEach((t, i) => {
+        const overdue = t.due_date && t.due_date < today ? " ⚠️期限切れ" : "";
+        const due     = t.due_date && t.due_date >= today ? ` 📅${t.due_date}` : "";
+        const pri     = t.priority === "高" ? "🔴" : t.priority === "中" ? "🟡" : "🟢";
+        lines.push(`  ${i + 1}. ${pri} *${t.title}*${overdue}${due}`);
       });
     }
 
-    if (gmailUnread.length > 0) {
-      lines.push(`\n📧 *Gmail未読（${gmailUnread.length}件）*`);
-      gmailUnread.slice(0, 5).forEach((m) => {
-        const from = m.from.replace(/<[^>]+>/, "").trim() || m.from;
-        lines.push(`  📨 *${m.subject || "(件名なし)"}*`);
-        lines.push(`     _${from}_`);
+    lines.push("");
+
+    // 追加でやると良いタスク
+    if (next3.length > 0) {
+      lines.push("💡 *追加でやると良いタスク*");
+      next3.forEach((t, i) => {
+        const due = t.due_date ? ` 📅${t.due_date}` : "";
+        const pri = t.priority === "高" ? "🔴" : t.priority === "中" ? "🟡" : "🟢";
+        lines.push(`  ${i + 4}. ${pri} ${t.title}${due}`);
       });
+      lines.push("");
     }
 
-    lines.push("\n───────────────────────");
-    lines.push("💬 `今日の計画` でAI行動計画 / `タスク一覧` で全件確認");
+    // 返信が必要なメール
+    if (replyNeeded.length > 0) {
+      lines.push(`📧 *返信が必要なメール（${replyNeeded.length}件）*`);
+      replyNeeded.slice(0, 4).forEach((m) => {
+        const from = m.from.replace(/<[^>]+>/, "").replace(/"/g, "").trim();
+        lines.push(`  • *${m.subject || "(件名なし)"}*`);
+        lines.push(`    _from: ${from}_`);
+      });
+      lines.push("");
+    }
+
+    lines.push("───────────────────────");
+    lines.push("💬 `今日の計画` でAI分析 / `タスク一覧` で全件確認");
 
     await postSlackMessage(channel, lines.join("\n"));
     return NextResponse.json({ ok: true });
